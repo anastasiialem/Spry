@@ -1,0 +1,123 @@
+name: Deploy
+
+# Every push to main: check, test, then ship both services.
+# CI runs the same Makefile targets a person runs locally - no secret recipe.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# One deploy at a time, never cancelled halfway.
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  backend-checks:
+    name: Backend (ruff + pytest)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      db:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: spry
+          POSTGRES_PASSWORD: spry
+          POSTGRES_DB: spry
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U spry -d spry"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql+asyncpg://spry:spry@localhost:5432/spry
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+      - run: uv python install 3.14
+      - run: uv sync --frozen
+      - run: uv run ruff check --output-format=github .
+      - run: uv run ruff format --check .
+      - run: uv run pytest -q
+
+  frontend-checks:
+    name: Frontend (eslint + prettier + tsc)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: frontend/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm format:check
+      - run: pnpm exec tsc --noEmit
+
+  deploy:
+    name: Deploy to AWS
+    needs: [backend-checks, frontend-checks]
+    runs-on: ubuntu-latest
+    # No `environment:` on purpose: it would change the OIDC subject, and the
+    # role trusts only repo:<owner>/<repo>:ref:refs/heads/main.
+    permissions:
+      id-token: write   # ask GitHub for an OIDC token; no access keys anywhere
+      contents: read
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+      PROJECT_NAME: spry
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Assume the deploy role (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-deploy-${{ github.run_id }}
+
+      # The Lambda runs on arm64, this runner is x86: build under emulation.
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: frontend/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      # Image tagged with the commit SHA -> ECR -> Lambda -> migrations.
+      - name: Deploy backend
+        run: make deploy-backend
+
+      - name: Deploy frontend
+        run: make deploy-frontend
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### Deploy"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| commit | \`${GITHUB_SHA::12}\` |"
+            echo "| api | $(grep ^BACKEND_URL= .env 2>/dev/null | cut -d= -f2-) |"
+            echo "| result | ${{ job.status }} |"
+          } >> "$GITHUB_STEP_SUMMARY"
