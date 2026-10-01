@@ -79,6 +79,15 @@ EXISTING_PROVIDER="$(aws iam list-open-id-connect-providers \
   --output text 2>/dev/null || true)"
 [[ "${EXISTING_PROVIDER}" == "None" ]] && EXISTING_PROVIDER=""
 
+# If that provider was created by this very stack, it is ours, not "existing":
+# passing it in would flip CreateProvider off and CloudFormation would DELETE
+# the provider on the update, leaving the role pointing at nothing
+# ("The web identity token provided could not be validated").
+if [[ -n "${EXISTING_PROVIDER}" ]] && aws cloudformation describe-stack-resource \
+     --stack-name "${STACK_NAME}" --logical-resource-id OidcProvider >/dev/null 2>&1; then
+  EXISTING_PROVIDER=""
+fi
+
 if [[ -n "${EXISTING_PROVIDER}" ]]; then
   log "reusing the GitHub OIDC provider already in this account"
 else
