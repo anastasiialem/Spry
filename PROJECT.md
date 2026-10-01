@@ -1,0 +1,239 @@
+# Spry — PROJECT.md
+
+This file is the **specification of the repository's structure**: folders, what lives in each,
+and the contracts between them. It contains no implementation. Every file in the repository is
+generated from it, so a mistake here is a mistake everywhere — change this file first, then the
+code.
+
+Why one repository and not three: see [`docs/decisions/0001-monorepo.md`](docs/decisions/0001-monorepo.md).
+
+---
+
+## 1. Scope of the first slice
+
+- The backend exposes `GET /api/meetings` (list) and `POST /api/meetings` (create one).
+- A meeting has: `id`, `title`, `starts_at`, `ends_at`, `attendee_count`.
+- The frontend has one page that lists meetings and a form that adds a new one.
+- `docker compose up --build` is the only command a new developer runs (after installing
+  Docker Desktop).
+
+**Out of scope — do not add:** authentication, users, update/delete endpoints, Redis or any
+cache, message queues, Celery or background workers, nginx or any reverse proxy, Kubernetes,
+a second database, server-side rendering.
+
+---
+
+## 2. Repository layout
+
+```
+spry/                              (repository root; folder may be named Peach locally)
+├── PROJECT.md                     # this specification
+├── README.md                      # how to run it; points here for structure
+├── .env.example                   # every variable Compose and the scripts read; committed
+├── .gitignore                     # .env, node_modules, .venv, build output
+├── docker-compose.yml             # local stack: db, backend, frontend
+├── Makefile                       # the commands humans and CI both run (up, lint, deploy-*)
+│
+├── docs/
+│   ├── decisions/                 # architecture decision records (why, not how)
+│   └── prompts/                   # the prompts this repo was generated from
+│
+├── .github/workflows/
+│   ├── lint.yml                   # ruff + eslint + prettier on every push and PR
+│   └── deploy.yml                 # on push to main: lint, then make deploy-backend / deploy-frontend
+│
+├── infra/                         # CloudFormation templates — the AWS resources, declared
+│   ├── backend.yaml               # ECR image → Lambda + function URL, Aurora Serverless v2, VPC wiring
+│   ├── frontend.yaml              # private S3 bucket + CloudFront (+ ACM cert / custom domain)
+│   └── github-oidc.yaml           # IAM role GitHub Actions assumes via OIDC (no access keys)
+│
+├── scripts/                       # imperative glue the Makefile calls; each one is idempotent
+│   ├── deploy-backend.sh          # build image → push to ECR (tag = git SHA) → update stack → migrate
+│   ├── deploy-frontend.sh         # vite build against BACKEND_URL → s3 sync → CloudFront invalidation
+│   ├── domain-*.sh                # ACM certificate + DNS records for the custom domains
+│   ├── destroy-*.sh               # tear down what deploy created
+│   └── github-role.sh             # create/update the OIDC role
+│
+├── backend/                       # the API; nothing outside this folder imports its Python
+│   ├── Dockerfile                 # stages: builder → runtime (Compose) and lambda (AWS)
+│   ├── pyproject.toml, uv.lock    # dependencies, exact versions locked
+│   ├── alembic.ini
+│   ├── app/
+│   │   ├── main.py                # FastAPI app factory: CORS, /health, routers
+│   │   ├── config.py              # Settings from environment (pydantic-settings); nothing reads os.environ
+│   │   ├── db.py                  # async engine, session factory, get_session dependency
+│   │   ├── lambda_handler.py      # Lambda entry: HTTP via Mangum; {"action":"migrate"} runs Alembic
+│   │   ├── api/meetings.py        # HTTP layer: parse, validate, call service, map to status codes
+│   │   ├── schemas/meeting.py     # Pydantic request/response models = the API contract in code
+│   │   ├── services/meetings.py   # business logic and queries; no HTTP types here
+│   │   └── models/meeting.py      # SQLAlchemy ORM model = the table
+│   ├── migrations/                # Alembic env + versions/; the only way the schema changes
+│   ├── scripts/entrypoint.sh      # container start: alembic upgrade head → uvicorn
+│   └── tests/                     # pytest against a real Postgres
+│
+└── frontend/                      # the UI; talks to the backend only over HTTP (§4)
+    ├── Dockerfile                 # node image running the Vite dev server for Compose
+    ├── package.json, pnpm-lock.yaml
+    ├── vite.config.ts             # React plugin, Tailwind plugin, "@/..." alias
+    ├── index.html                 # Vite entry
+    ├── components.json            # shadcn/ui CLI config
+    ├── eslint.config.js, .prettierrc
+    └── src/
+        ├── main.tsx               # mounts <App/> with the QueryClientProvider
+        ├── App.tsx                # the single page: header, meeting list, add form
+        ├── index.css              # Tailwind import + shadcn theme variables
+        ├── components/
+        │   ├── ui/                # generated by `shadcn add`; not edited by hand
+        │   ├── meeting-list.tsx   # renders GET /api/meetings
+        │   └── meeting-form.tsx   # posts to POST /api/meetings
+        └── lib/
+            ├── api.ts             # the only module that calls fetch; zod schemas mirror §4
+            └── utils.ts           # cn() helper from shadcn
+```
+
+**Boundary rule:** the only contract between `frontend/` and `backend/` is the HTTP API in §4.
+Neither imports the other's code.
+
+---
+
+## 3. Local stack — `docker-compose.yml`
+
+One Compose file, three services on the default network, one named volume `pgdata`.
+
+| Service | Image / build | Listens on (container → host) | Depends on | How it knows the dependency is ready |
+|---|---|---|---|---|
+| `db` | `postgres:17-alpine` | `5432 → ${POSTGRES_PORT:-5432}` | — | its own healthcheck: `pg_isready -U $POSTGRES_USER -d $POSTGRES_DB`, every 5 s, 10 retries |
+| `backend` | `build: ./backend` (target `runtime`, base `python:3.14-slim`) | `8000 → ${BACKEND_PORT:-8000}` | `db` | `depends_on: db: condition: service_healthy`; own healthcheck `curl -fsS http://localhost:8000/health` |
+| `frontend` | `build: ./frontend` (base `node:22-alpine`) | `5173 → ${FRONTEND_PORT:-5173}` | `backend` | `depends_on: backend: condition: service_healthy` |
+
+**Startup order is explicit, not assumed:** `depends_on` alone orders container *start*; the
+`condition: service_healthy` lines make each service wait until the previous one *answers*.
+
+**Migrations run at container start**, not at build time: `backend/scripts/entrypoint.sh` runs
+`alembic upgrade head`, then starts Uvicorn. A fresh volume comes up with the `meetings` table.
+On AWS the same migration runs once per deploy by invoking the Lambda with `{"action":"migrate"}`.
+
+**If the database disappears later** (no Compose feature helps): the engine uses
+`pool_pre_ping`, so the next request gets a fresh connection; while the DB is down requests
+fail with `503` instead of hanging, and `restart: unless-stopped` restarts a crashed container.
+
+**Development-only lines** (wrong in production): the published `db` port, the bind mounts
+`./backend:/app` and `./frontend:/app`, `uvicorn --reload`, the Vite dev server, the default
+`peach`/`peach` credentials.
+
+---
+
+## 4. API contract
+
+Base URL: `http://localhost:8000` locally, `https://api.<domain>` deployed. JSON only,
+`Content-Type: application/json`. Errors use FastAPI's shape `{"detail": ...}`.
+
+### `GET /health`
+`200 {"status": "ok"}` — liveness; touches no dependencies. Used by Compose healthchecks.
+
+### `GET /api/meetings`
+`200` with a JSON **array** of `Meeting`, ordered by `starts_at` ascending, then `id`.
+No pagination in this slice. Empty table → `[]`.
+
+### `POST /api/meetings`
+Request body `MeetingCreate`; response `201` with the created `Meeting`.
+Invalid body → `422` with FastAPI's validation `detail` list.
+
+```jsonc
+// MeetingCreate (request)
+{
+  "title": "Weekly sync",                    // string, 1..200 chars after trimming, required
+  "starts_at": "2026-10-05T09:00:00Z",       // string, ISO 8601 with timezone, required
+  "ends_at":   "2026-10-05T09:30:00Z",       // string, ISO 8601 with timezone, must be > starts_at
+  "attendee_count": 4                        // integer, 1..1000, required
+}
+
+// Meeting (response) = MeetingCreate + id
+{
+  "id": 1,                                   // integer, assigned by the database
+  "title": "Weekly sync",
+  "starts_at": "2026-10-05T09:00:00Z",       // always returned in UTC with "Z"
+  "ends_at":   "2026-10-05T09:30:00Z",
+  "attendee_count": 4
+}
+```
+
+Datetimes without a timezone are rejected (`422`); the client always sends UTC.
+
+### Database table `meetings`
+
+| Column | Type | Constraint |
+|---|---|---|
+| `id` | `integer` | primary key, identity |
+| `title` | `varchar(200)` | not null |
+| `starts_at` | `timestamptz` | not null, indexed |
+| `ends_at` | `timestamptz` | not null, `CHECK (ends_at > starts_at)` |
+| `attendee_count` | `integer` | not null, `CHECK (attendee_count BETWEEN 1 AND 1000)` |
+
+Created by Alembic revision `0001_create_meetings`. `Base.metadata.create_all()` is used only
+in tests.
+
+---
+
+## 5. Frontend behaviour
+
+- One page (`/`). Header "Spry"; a form card ("New meeting": title, start, end, attendees,
+  submit); below it a list of meeting cards showing title, date, time range, duration and
+  attendee count.
+- Loading → skeleton cards; empty list → "No meetings yet"; failed fetch → error alert with
+  a Retry button.
+- Submitting the form calls `POST`, then refetches the list; validation errors are shown
+  under the field. The form converts the browser's local time to UTC before sending.
+- Reloading the page shows the same meetings — they come from Postgres, not from memory.
+- shadcn components used: `button card input label alert skeleton`.
+
+---
+
+## 6. Configuration
+
+All configuration is environment variables. `.env.example` is committed; `.env` is ignored.
+
+| Variable | Used by | Local default |
+|---|---|---|
+| `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | db | `spry` / `spry` / `spry` |
+| `DATABASE_URL` | backend | `postgresql+asyncpg://spry:spry@db:5432/spry` |
+| `CORS_ORIGINS` | backend | `http://localhost:5173` (comma-separated) |
+| `VITE_API_URL` | frontend, **build time** | `http://localhost:8000` |
+| `AWS_REGION`, `PROJECT_NAME`, `DOMAIN_NAME`, `BACKEND_URL` | scripts | `us-east-1`, `spry`, —, — |
+
+`VITE_API_URL` is inlined into the bundle when Vite builds, so the deployed frontend is built
+against the deployed API URL.
+
+---
+
+## 7. Pinned versions
+
+| Thing | Version |
+|---|---|
+| PostgreSQL (local) | `postgres:17-alpine` — matches Aurora PostgreSQL 17 on AWS |
+| Python | `python:3.14-slim` (Compose), `public.ecr.aws/lambda/python:3.14` (Lambda) |
+| Node | `node:22-alpine`, pnpm 10 via corepack |
+| Backend libraries | FastAPI, SQLAlchemy 2.0, Alembic 1, asyncpg, pydantic-settings 2, Mangum — exact versions in `uv.lock` |
+| Frontend libraries | React 19, Vite, Tailwind CSS 4, TypeScript 5, zod 4, TanStack Query 5 — exact versions in `pnpm-lock.yaml` |
+| Lint | ruff (backend), ESLint 9 + Prettier 3 (frontend) |
+
+Lockfiles are committed; Docker builds install with `--frozen` / `--frozen-lockfile`.
+
+---
+
+## 8. Deployment (AWS, us-east-1)
+
+```
+browser ──HTTPS──> app.<domain> ─> CloudFront ─> private S3 bucket (static Vite build)
+browser ──HTTPS──> api.<domain> ─> CloudFront ─> Lambda function URL ─> FastAPI (Mangum) ─> Aurora Serverless v2
+```
+
+- `make deploy-backend` — build the `lambda` image, push to ECR tagged with the git SHA,
+  update the CloudFormation stack, run migrations, write `BACKEND_URL` to `.env`.
+- `make deploy-frontend` — `vite build` with `VITE_API_URL=$BACKEND_URL`, `aws s3 sync`,
+  CloudFront invalidation.
+- Custom domain: ACM certificates (us-east-1), validated by DNS CNAME; `app.` and `api.`
+  pointed at their CloudFront distributions.
+- CI: `.github/workflows/deploy.yml` on push to `main` runs lint, then the same `make` targets,
+  with credentials from OIDC (`aws-actions/configure-aws-credentials@v4`), trust policy limited
+  to `repo:<owner>/<repo>:ref:refs/heads/main`.
