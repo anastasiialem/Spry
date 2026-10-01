@@ -109,6 +109,7 @@ else
     -v "${PROJECT_NAME}_build_node_modules:/app/node_modules" \
     -v "${PROJECT_NAME}_pnpm_store:/pnpm-store" \
     -e npm_config_store_dir=/pnpm-store \
+    -e CI=true \
     -w /app \
     -e COREPACK_ENABLE_DOWNLOAD_PROMPT=0 \
     -e VITE_API_URL="${API_URL}" \

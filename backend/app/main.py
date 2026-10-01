@@ -1,6 +1,6 @@
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from sqlalchemy.exc import InterfaceError, OperationalError
 
 from app.api.attachments import router as attachments_router
@@ -28,6 +28,11 @@ def create_app() -> FastAPI:
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             content={"detail": "database unavailable"},
         )
+
+    @app.get("/", include_in_schema=False)
+    async def root() -> RedirectResponse:
+        """Someone opening the bare API address lands on the interactive docs."""
+        return RedirectResponse(url="/docs")
 
     @app.get("/health", tags=["health"], summary="Liveness probe")
     async def health() -> dict[str, str]:

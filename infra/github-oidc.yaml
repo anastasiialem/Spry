@@ -11,12 +11,12 @@ Description: >-
 Parameters:
   ProjectName:
     Type: String
-    Default: peach
+    Default: spry
     Description: Scopes what the role is allowed to touch.
 
   GitHubRepo:
     Type: String
-    Description: owner/repo, e.g. dobosevych/Peach
+    Description: owner/repo, e.g. anastasiialem/Spry
     AllowedPattern: "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
 
   SubjectClaim:
@@ -197,6 +197,30 @@ Resources:
                   - secretsmanager:TagResource
                   - secretsmanager:UpdateSecret
                 Resource: !Sub "arn:aws:secretsmanager:*:${AWS::AccountId}:secret:${ProjectName}/*"
+
+              # --- frontend: bucket, distribution, cache invalidation ----------
+              - Sid: SiteBucket
+                Effect: Allow
+                Action: s3:*
+                Resource:
+                  - !Sub "arn:aws:s3:::${ProjectName}-frontend-${AWS::AccountId}-*"
+                  - !Sub "arn:aws:s3:::${ProjectName}-frontend-${AWS::AccountId}-*/*"
+
+              # CloudFront has no per-project names to scope by, only this
+              # account's distributions and origin access controls.
+              - Sid: CloudFront
+                Effect: Allow
+                Action: cloudfront:*
+                Resource: !Sub "arn:aws:cloudfront::${AWS::AccountId}:*"
+
+              # Attaching an existing ACM certificate to a distribution;
+              # read-only, the certificate itself is made by hand (make domain-cert).
+              - Sid: CertificatesReadOnly
+                Effect: Allow
+                Action:
+                  - acm:DescribeCertificate
+                  - acm:ListCertificates
+                Resource: "*"
 
               - Sid: Logs
                 Effect: Allow

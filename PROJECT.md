@@ -142,6 +142,10 @@ fail with `503` instead of hanging, and `restart: unless-stopped` restarts a cra
 Base URL: `http://localhost:8000` locally, `https://api.<domain>` deployed. JSON only,
 `Content-Type: application/json`. Errors use FastAPI's shape `{"detail": ...}`.
 
+### `GET /`
+`307` redirect to `/docs` (Swagger UI), so the bare API address is never a 404. Not in the
+OpenAPI schema.
+
 ### `GET /health`
 `200 {"status": "ok"}` — liveness; touches no dependencies. Used by Compose healthchecks.
 

@@ -25,7 +25,7 @@ for var in AWS_PROFILE AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
   [[ -n "${!var:-}" ]] || unset "${var}"
 done
 
-PROJECT_NAME="${PROJECT_NAME:-peach}"
+PROJECT_NAME="${PROJECT_NAME:-spry}"
 STACK_NAME="${GITHUB_ROLE_STACK_NAME:-${PROJECT_NAME}-github-oidc}"
 AWS_REGION="${AWS_REGION:-${AWS_DEFAULT_REGION:-us-east-1}}"
 export AWS_DEFAULT_REGION="${AWS_REGION}"
@@ -97,7 +97,7 @@ if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
   gh variable set AWS_DEPLOY_ROLE_ARN --repo "${REPO}" --body "${ROLE_ARN}"
   gh variable set AWS_REGION --repo "${REPO}" --body "${AWS_REGION}"
   echo
-  echo "  Done. Write \"deploy\" in a commit message on main and the backend ships."
+  echo "  Done. Every push to main now runs .github/workflows/deploy.yml."
 else
   echo
   echo "  gh is not installed or not logged in. Set these two repository"
