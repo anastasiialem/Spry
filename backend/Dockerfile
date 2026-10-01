@@ -1,46 +1,43 @@
 # syntax=docker/dockerfile:1
 
-# --- builder: resolve dependencies into a self-contained virtualenv ---
+# --- builder: resolve locked dependencies into /opt/venv ---
+# The venv lives outside /app so the Compose bind mount (./backend:/app) cannot hide it.
 FROM python:3.14-slim AS builder
 
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+COPY --from=ghcr.io/astral-sh/uv:0.9 /uv /usr/local/bin/uv
 
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
-    UV_PROJECT_ENVIRONMENT=/app/.venv
+    UV_PROJECT_ENVIRONMENT=/opt/venv
 
 WORKDIR /app
-
 COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --no-install-project
 
-# --- dev: same base plus dev dependencies, used by docker-compose.override.yml ---
+# --- dev: what docker-compose.yml runs; adds pytest + ruff and curl for the healthcheck ---
 FROM builder AS dev
-
-ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1 \
-    PATH="/app/.venv/bin:$PATH"
-
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-install-project
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/*
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-install-project
 
-WORKDIR /app
+ENV PATH="/opt/venv/bin:$PATH" \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
 COPY . .
 EXPOSE 8000
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+CMD ["sh", "./scripts/entrypoint.sh", "--reload"]
 
-
-# --- runtime ---
+# --- runtime: production-like container, no dev dependencies, non-root ---
 FROM python:3.14-slim AS runtime
 
-ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1 \
-    PATH="/app/.venv/bin:$PATH"
+ENV PATH="/opt/venv/bin:$PATH" \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends curl \
@@ -48,23 +45,16 @@ RUN apt-get update \
     && useradd --create-home --uid 1000 app
 
 WORKDIR /app
-
-COPY --from=builder --chown=app:app /app/.venv /app/.venv
+COPY --from=builder /opt/venv /opt/venv
 COPY --chown=app:app . .
-
 USER app
 EXPOSE 8000
-
-CMD ["./scripts/entrypoint.sh"]
-
+CMD ["sh", "./scripts/entrypoint.sh"]
 
 # --- lambda: what scripts/deploy-backend.sh ships to AWS Lambda ---
-# AWS's base image carries the runtime interface client. The virtualenv from
-# the builder cannot be reused here - it points at /usr/local/bin/python - so
-# the locked dependencies are installed straight into the task root instead.
 FROM public.ecr.aws/lambda/python:3.14 AS lambda
 
-RUN --mount=from=ghcr.io/astral-sh/uv:latest,source=/uv,target=/bin/uv \
+RUN --mount=from=ghcr.io/astral-sh/uv:0.9,source=/uv,target=/bin/uv \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
     --mount=type=bind,source=uv.lock,target=uv.lock \
     uv export --frozen --no-dev --no-hashes --no-emit-project -o /tmp/requirements.txt \

@@ -6,54 +6,30 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    """Application configuration, sourced entirely from the environment."""
+    """Application configuration, read only from environment variables."""
 
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(extra="ignore")
 
-    app_name: str = "Peach API"
+    app_name: str = "Spry API"
     app_env: Literal["development", "test", "production"] = "development"
     log_level: str = "info"
 
-    database_url: str = "postgresql+asyncpg://peach:peach@db:5432/peach"
-    # Off on Lambda: a warm but idle execution environment would otherwise hold
-    # pooled connections open, and Aurora Serverless only pauses at zero.
+    database_url: str = "postgresql+asyncpg://spry:spry@db:5432/spry"
+    # False on Lambda: an idle execution environment must not hold connections
+    # open, or Aurora Serverless never pauses.
     db_pooling: bool = True
-    # NoDecode keeps pydantic-settings from JSON-parsing the env value, so the
-    # validator below can accept the comma-separated form Compose passes.
-    cors_origins: Annotated[list[str], NoDecode] = Field(
-        default_factory=lambda: ["http://localhost:3000"]
-    )
 
-    # Cognito. With no user pool configured every protected endpoint answers
-    # 503, so a missing setting can never leave the API open.
-    cognito_region: str = "us-east-1"
-    cognito_user_pool_id: str = ""
-    cognito_client_id: str = ""
-    # The pool's public keys as JSON. Set on Lambda, which has no route to fetch
-    # them; left empty elsewhere, and they are downloaded from the issuer.
-    cognito_jwks: str = ""
+    # NoDecode: accept the comma-separated string Compose passes, not JSON.
+    cors_origins: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: ["http://localhost:5173"]
+    )
 
     @field_validator("cors_origins", mode="before")
     @classmethod
     def _split_origins(cls, value: object) -> object:
-        """Accept a comma-separated string, since that is how Compose passes it."""
         if isinstance(value, str):
             return [origin.strip() for origin in value.split(",") if origin.strip()]
         return value
-
-    @property
-    def cognito_issuer(self) -> str:
-        return (
-            f"https://cognito-idp.{self.cognito_region}.amazonaws.com/{self.cognito_user_pool_id}"
-        )
-
-    @property
-    def auth_configured(self) -> bool:
-        return bool(self.cognito_user_pool_id and self.cognito_client_id)
-
-    @property
-    def is_development(self) -> bool:
-        return self.app_env == "development"
 
 
 @lru_cache

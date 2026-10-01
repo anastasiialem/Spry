@@ -1,78 +1,63 @@
-name: peach
+# Local development stack. `docker compose up --build` is the only command to run.
+name: spry
 
 services:
   db:
     image: postgres:17-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-peach}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-peach}
-      POSTGRES_DB: ${POSTGRES_DB:-peach}
+      POSTGRES_USER: ${POSTGRES_USER:-spry}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-spry}
+      POSTGRES_DB: ${POSTGRES_DB:-spry}
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "${POSTGRES_PORT:-5432}:5432" # dev only: lets you inspect the DB from the host
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-peach} -d ${POSTGRES_DB:-peach}"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
       retries: 10
-    networks: [peach]
 
   backend:
     build:
       context: ./backend
+      target: dev
     restart: unless-stopped
     depends_on:
       db:
-        condition: service_healthy
+        condition: service_healthy # wait until Postgres answers, not just starts
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://peach:peach@db:5432/peach}
-      APP_ENV: ${APP_ENV:-development}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-spry}:${POSTGRES_PASSWORD:-spry}@db:5432/${POSTGRES_DB:-spry}
+      APP_ENV: development
       LOG_LEVEL: ${LOG_LEVEL:-info}
-      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
-      # From make deploy-cognito. Unset, every /api/v1 route answers 503.
-      COGNITO_REGION: ${COGNITO_REGION:-us-east-1}
-      COGNITO_USER_POOL_ID: ${COGNITO_USER_POOL_ID:-}
-      COGNITO_CLIENT_ID: ${COGNITO_CLIENT_ID:-}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
     ports:
       - "${BACKEND_PORT:-8000}:8000"
+    volumes:
+      - ./backend:/app # dev only: live code + uvicorn --reload
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:8000/health || exit 1"]
       interval: 5s
       timeout: 5s
       retries: 12
       start_period: 20s
-    networks: [peach]
 
   frontend:
     build:
       context: ./frontend
-      args:
-        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
-        NEXT_PUBLIC_COGNITO_REGION: ${COGNITO_REGION:-us-east-1}
-        NEXT_PUBLIC_COGNITO_CLIENT_ID: ${COGNITO_CLIENT_ID:-}
-        NEXT_PUBLIC_COGNITO_DOMAIN: ${COGNITO_DOMAIN:-}
-        NEXT_PUBLIC_COGNITO_GOOGLE_ENABLED: ${COGNITO_GOOGLE_ENABLED:-false}
     restart: unless-stopped
     depends_on:
       backend:
         condition: service_healthy
     environment:
-      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
-      INTERNAL_API_URL: ${INTERNAL_API_URL:-http://backend:8000}
-      NEXT_PUBLIC_COGNITO_REGION: ${COGNITO_REGION:-us-east-1}
-      NEXT_PUBLIC_COGNITO_CLIENT_ID: ${COGNITO_CLIENT_ID:-}
-      NEXT_PUBLIC_COGNITO_DOMAIN: ${COGNITO_DOMAIN:-}
-      NEXT_PUBLIC_COGNITO_GOOGLE_ENABLED: ${COGNITO_GOOGLE_ENABLED:-false}
-      NODE_ENV: production
+      # Read by the browser, so it is the host's address, not http://backend:8000.
+      VITE_API_URL: ${VITE_API_URL:-http://localhost:8000}
     ports:
-      - "${FRONTEND_PORT:-3000}:3000"
-    networks: [peach]
+      - "${FRONTEND_PORT:-5173}:5173"
+    volumes:
+      - ./frontend:/app # dev only: live code + Vite HMR
+      - /app/node_modules # keep the image's node_modules, not the host's
 
 volumes:
   pgdata:
-
-networks:
-  peach:
-    driver: bridge

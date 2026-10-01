@@ -1,18 +1,17 @@
 [project]
-name = "peach-backend"
+name = "spry-backend"
 version = "0.1.0"
-description = "Peach API"
+description = "Spry API"
 requires-python = ">=3.14"
 dependencies = [
     "fastapi>=0.118",
     "uvicorn[standard]>=0.37",
-    "sqlalchemy[asyncio]>=2.0.36",
+    "sqlalchemy[asyncio]>=2.0.36,<2.1",
     "asyncpg>=0.31",
     "alembic>=1.14",
     "pydantic>=2.10",
     "pydantic-settings>=2.7",
     "mangum>=0.22.0",
-    "pyjwt[crypto]>=2.10",
 ]
 
 [dependency-groups]

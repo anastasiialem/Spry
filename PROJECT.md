@@ -26,7 +26,7 @@ a second database, server-side rendering.
 ## 2. Repository layout
 
 ```
-spry/                              (repository root; folder may be named Peach locally)
+spry/                              (repository root)
 ├── PROJECT.md                     # this specification
 ├── README.md                      # how to run it; points here for structure
 ├── .env.example                   # every variable Compose and the scripts read; committed
@@ -55,7 +55,7 @@ spry/                              (repository root; folder may be named Peach l
 │   └── github-role.sh             # create/update the OIDC role
 │
 ├── backend/                       # the API; nothing outside this folder imports its Python
-│   ├── Dockerfile                 # stages: builder → runtime (Compose) and lambda (AWS)
+│   ├── Dockerfile                 # stages: builder → dev (Compose), runtime, lambda (AWS)
 │   ├── pyproject.toml, uv.lock    # dependencies, exact versions locked
 │   ├── alembic.ini
 │   ├── app/
@@ -103,7 +103,7 @@ One Compose file, three services on the default network, one named volume `pgdat
 | Service | Image / build | Listens on (container → host) | Depends on | How it knows the dependency is ready |
 |---|---|---|---|---|
 | `db` | `postgres:17-alpine` | `5432 → ${POSTGRES_PORT:-5432}` | — | its own healthcheck: `pg_isready -U $POSTGRES_USER -d $POSTGRES_DB`, every 5 s, 10 retries |
-| `backend` | `build: ./backend` (target `runtime`, base `python:3.14-slim`) | `8000 → ${BACKEND_PORT:-8000}` | `db` | `depends_on: db: condition: service_healthy`; own healthcheck `curl -fsS http://localhost:8000/health` |
+| `backend` | `build: ./backend` (target `dev`, base `python:3.14-slim`) | `8000 → ${BACKEND_PORT:-8000}` | `db` | `depends_on: db: condition: service_healthy`; own healthcheck `curl -fsS http://localhost:8000/health` |
 | `frontend` | `build: ./frontend` (base `node:22-alpine`) | `5173 → ${FRONTEND_PORT:-5173}` | `backend` | `depends_on: backend: condition: service_healthy` |
 
 **Startup order is explicit, not assumed:** `depends_on` alone orders container *start*; the
@@ -119,7 +119,7 @@ fail with `503` instead of hanging, and `restart: unless-stopped` restarts a cra
 
 **Development-only lines** (wrong in production): the published `db` port, the bind mounts
 `./backend:/app` and `./frontend:/app`, `uvicorn --reload`, the Vite dev server, the default
-`peach`/`peach` credentials.
+`spry`/`spry` credentials.
 
 ---
 
