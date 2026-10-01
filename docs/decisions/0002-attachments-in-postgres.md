@@ -6,7 +6,7 @@
 ## Context
 
 Meetings get file attachments. A file has to be stored somewhere both locally
-(`docker compose up`) and on AWS (Lambda + Aurora). The two usual places are the database
+(`docker compose up`) and on AWS (Lambda + RDS PostgreSQL). The two usual places are the database
 (`bytea` column) or object storage (S3, with presigned URLs).
 
 ## Decision
@@ -18,7 +18,7 @@ the raw request body.
 
 - **Same code everywhere.** Locally there is no S3; with files in Postgres, Compose needs no
   extra service (an S3 emulator would be exactly the "add nothing" creep PROJECT.md forbids),
-  and AWS needs no bucket, IAM policy or VPC endpoint for the Lambda — it already reaches Aurora.
+  and AWS needs no bucket, IAM policy or VPC endpoint for the Lambda — it already reaches the database.
 - **One transaction.** A file and its row are written and deleted together; deleting a
   meeting cascades to its files. With S3 a crash between the two writes leaves orphans.
 - **Backups and migrations already cover it.**

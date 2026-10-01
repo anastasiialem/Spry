@@ -48,7 +48,7 @@ spry/                              (repository root)
 │   └── deploy.yml                 # on push to main: lint, then make deploy-backend / deploy-frontend
 │
 ├── infra/                         # CloudFormation templates — the AWS resources, declared
-│   ├── backend.yaml               # ECR image → Lambda + function URL, Aurora Serverless v2, VPC wiring
+│   ├── backend.yaml               # ECR image → Lambda + function URL, RDS PostgreSQL 17, VPC wiring
 │   ├── frontend.yaml              # private S3 bucket + CloudFront (+ ACM cert / custom domain)
 │   └── github-oidc.yaml           # IAM role GitHub Actions assumes via OIDC (no access keys)
 │
@@ -101,6 +101,7 @@ spry/                              (repository root)
         └── lib/
             ├── api.ts             # the only module that calls fetch; zod schemas mirror §4
             ├── week-stats.ts      # pure functions: week boundaries and the three metrics
+            ├── meeting-validation.ts # form rules mirroring §4, UTC <-> datetime-local conversion
             └── utils.ts           # cn() helper from shadcn
 ```
 
@@ -310,7 +311,7 @@ against the deployed API URL.
 
 | Thing | Version |
 |---|---|
-| PostgreSQL (local) | `postgres:17-alpine` — matches Aurora PostgreSQL 17 on AWS |
+| PostgreSQL (local) | `postgres:17-alpine` — matches RDS PostgreSQL 17 on AWS |
 | Python | `python:3.14-slim` (Compose), `public.ecr.aws/lambda/python:3.14` (Lambda) |
 | Node | `node:22-alpine`, pnpm 10 via corepack |
 | Backend libraries | FastAPI, SQLAlchemy 2.0, Alembic 1, asyncpg, pydantic-settings 2, Mangum — exact versions in `uv.lock` |
@@ -325,7 +326,7 @@ Lockfiles are committed; Docker builds install with `--frozen` / `--frozen-lockf
 
 ```
 browser ──HTTPS──> app.<domain> ─> CloudFront ─> private S3 bucket (static Vite build)
-browser ──HTTPS──> api.<domain> ─> CloudFront ─> Lambda function URL ─> FastAPI (Mangum) ─> Aurora Serverless v2
+browser ──HTTPS──> api.<domain> ─> CloudFront ─> Lambda function URL ─> FastAPI (Mangum) ─> RDS PostgreSQL (private subnets)
 ```
 
 - `make deploy-backend` — build the `lambda` image, push to ECR tagged with the git SHA,

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Tear the backend stack down: the Lambda function, its URL and the Aurora
-# cluster. Idle, only Aurora's storage still bills - this stops that too.
+# Tear the backend stack down: the Lambda function, its URL and the RDS
+# instance (which bills by the hour once outside the free tier).
 #
 # The database goes with it: the stack sets DeletionPolicy Delete. A function
 # in a VPC leaves network interfaces behind that Lambda releases on its own
@@ -42,7 +42,7 @@ aws cloudformation describe-stacks --stack-name "${STACK_NAME}" >/dev/null 2>&1 
 
 if [[ "${FORCE:-0}" != "1" ]]; then
   echo "This deletes stack ${STACK_NAME} in ${AWS_REGION}, including the"
-  echo "${PROJECT_NAME}-db Aurora cluster and everything in it."
+  echo "${PROJECT_NAME}-db RDS instance and everything in it."
   read -r -p "Type the stack name to confirm: " reply
   [[ "${reply}" == "${STACK_NAME}" ]] || die "aborted"
 fi
