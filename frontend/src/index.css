@@ -2,30 +2,58 @@
 
 @custom-variant dark (&:is(.dark *));
 
-/* shadcn/ui theme tokens (neutral base). */
+/*
+ * Palette: a deep-green coffeehouse scheme on a warm neutral page.
+ * Layout and typography follow Notion: system sans, quiet borders, tinted callouts.
+ */
 :root {
-  --radius: 0.625rem;
-  --background: oklch(0.985 0.002 247);
-  --foreground: oklch(0.21 0.02 265);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.21 0.02 265);
-  --primary: oklch(0.55 0.2 264);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.96 0.005 264);
-  --secondary-foreground: oklch(0.25 0.02 265);
-  --muted: oklch(0.96 0.005 264);
-  --muted-foreground: oklch(0.52 0.02 265);
-  --accent: oklch(0.95 0.02 264);
-  --accent-foreground: oklch(0.3 0.1 264);
-  --destructive: oklch(0.58 0.22 27);
-  --border: oklch(0.92 0.006 264);
-  --input: oklch(0.92 0.006 264);
-  --ring: oklch(0.55 0.2 264);
+  --radius: 0.5rem;
+
+  --background: #f9f8f6; /* warm off-white page */
+  --foreground: #1f1f1d;
+  --card: #ffffff;
+  --card-foreground: #1f1f1d;
+
+  --primary: #00754a; /* accent green: buttons, links, focus */
+  --primary-foreground: #ffffff;
+  --house: #1e3932; /* house green: cover, headings accent */
+  --house-foreground: #ffffff;
+  --secondary: #f2f0eb; /* warm neutral */
+  --secondary-foreground: #1e3932;
+  --muted: #f2f0eb;
+  --muted-foreground: #6b6a66;
+  --accent: #d4e9e2; /* light green: hover, chips */
+  --accent-foreground: #1e3932;
+  --gold: #cba258;
+  --destructive: #c82014;
+  --border: #e6e3dc;
+  --input: #dcd8cf;
+  --ring: #00754a;
+
+  /* Notion callout tints */
+  --tint-green: #e7f3ee;
+  --tint-gold: #faf3e3;
+  --tint-sand: #f2f0eb;
+  /* Notion-style status pills */
+  --status-todo-bg: #ebeae6;
+  --status-todo-fg: #55534e;
+  --status-todo-dot: #9b9a97;
+  --status-progress-bg: #fbeccd;
+  --status-progress-fg: #7a5410;
+  --status-progress-dot: #d99a2b;
+  --status-done-bg: #d4e9e2;
+  --status-done-fg: #1e3932;
+  --status-done-dot: #00754a;
+
+  --lime: #b5e06f; /* cover gradient end */
+  --up: #00754a;
+  --down: #b5432f;
 }
 
 @theme inline {
   --font-sans:
-    "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica,
+    "Apple Color Emoji", Arial, sans-serif;
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
@@ -36,16 +64,34 @@
   --color-card-foreground: var(--card-foreground);
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
+  --color-house: var(--house);
+  --color-house-foreground: var(--house-foreground);
   --color-secondary: var(--secondary);
   --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);
   --color-muted-foreground: var(--muted-foreground);
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
+  --color-gold: var(--gold);
   --color-destructive: var(--destructive);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+  --color-tint-green: var(--tint-green);
+  --color-tint-gold: var(--tint-gold);
+  --color-tint-sand: var(--tint-sand);
+  --color-up: var(--up);
+  --color-lime: var(--lime);
+  --color-status-todo-bg: var(--status-todo-bg);
+  --color-status-todo-fg: var(--status-todo-fg);
+  --color-status-todo-dot: var(--status-todo-dot);
+  --color-status-progress-bg: var(--status-progress-bg);
+  --color-status-progress-fg: var(--status-progress-fg);
+  --color-status-progress-dot: var(--status-progress-dot);
+  --color-status-done-bg: var(--status-done-bg);
+  --color-status-done-fg: var(--status-done-fg);
+  --color-status-done-dot: var(--status-done-dot);
+  --color-down: var(--down);
 }
 
 @layer base {
@@ -54,5 +100,8 @@
   }
   body {
     @apply bg-background text-foreground antialiased;
+  }
+  ::selection {
+    background-color: rgb(0 117 74 / 0.18);
   }
 }

@@ -7,24 +7,46 @@ const API_URL = (
 
 /* --- schemas mirroring PROJECT.md section 4 --- */
 
+export const meetingStatuses = ["not_started", "in_progress", "done"] as const;
+export const meetingStatusSchema = z.enum(meetingStatuses);
+export type MeetingStatus = z.infer<typeof meetingStatusSchema>;
+
 export const meetingSchema = z.object({
   id: z.number().int(),
   title: z.string(),
   starts_at: z.iso.datetime(),
   ends_at: z.iso.datetime(),
   attendee_count: z.number().int(),
+  status: meetingStatusSchema,
+  attachment_count: z.number().int(),
 });
 
 export const meetingListSchema = z.array(meetingSchema);
 
 export type Meeting = z.infer<typeof meetingSchema>;
 
+export const attachmentSchema = z.object({
+  id: z.number().int(),
+  meeting_id: z.number().int(),
+  filename: z.string(),
+  content_type: z.string(),
+  size: z.number().int(),
+  created_at: z.iso.datetime(),
+});
+export type Attachment = z.infer<typeof attachmentSchema>;
+
+/** Same limit as the backend (PROJECT.md §4). */
+export const MAX_ATTACHMENT_BYTES = 4 * 1024 * 1024;
+
 export type MeetingCreate = {
   title: string;
   starts_at: string; // ISO 8601, UTC
   ends_at: string;
   attendee_count: number;
+  status: MeetingStatus;
 };
+
+export type MeetingPatch = Partial<MeetingCreate>;
 
 export class ApiError extends Error {
   constructor(
@@ -62,6 +84,7 @@ async function request<T>(
           : `Request failed (${response.status})`;
     throw new ApiError(response.status, message);
   }
+  if (response.status === 204) return schema.parse(undefined);
   return schema.parse(await response.json());
 }
 
@@ -73,4 +96,34 @@ export const api = {
       method: "POST",
       body: JSON.stringify(payload),
     }),
+  updateMeeting: (id: number, patch: MeetingPatch) =>
+    request(`/api/meetings/${id}`, meetingSchema, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    }),
+  updateMeetingStatus: (id: number, status: MeetingStatus) =>
+    request(`/api/meetings/${id}`, meetingSchema, {
+      method: "PATCH",
+      body: JSON.stringify({ status }),
+    }),
+
+  listAttachments: (meetingId: number) =>
+    request(
+      `/api/meetings/${meetingId}/attachments`,
+      z.array(attachmentSchema),
+    ),
+  /** The file is sent as the raw body; its name travels in the query string. */
+  uploadAttachment: (meetingId: number, file: File) =>
+    request(
+      `/api/meetings/${meetingId}/attachments?filename=${encodeURIComponent(file.name)}`,
+      attachmentSchema,
+      {
+        method: "POST",
+        body: file,
+        headers: { "Content-Type": file.type || "application/octet-stream" },
+      },
+    ),
+  deleteAttachment: (id: number) =>
+    request(`/api/attachments/${id}`, z.undefined(), { method: "DELETE" }),
+  attachmentUrl: (id: number) => `${API_URL}/api/attachments/${id}`,
 };

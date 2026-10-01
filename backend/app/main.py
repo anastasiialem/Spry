@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import InterfaceError, OperationalError
 
+from app.api.attachments import router as attachments_router
 from app.api.meetings import router as meetings_router
 from app.config import get_settings
 
@@ -14,7 +15,7 @@ def create_app() -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
-        allow_methods=["GET", "POST"],
+        allow_methods=["GET", "POST", "PATCH", "DELETE"],
         allow_headers=["Content-Type"],
     )
 
@@ -34,6 +35,7 @@ def create_app() -> FastAPI:
         return {"status": "ok"}
 
     app.include_router(meetings_router)
+    app.include_router(attachments_router)
     return app
 
 
