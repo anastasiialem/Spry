@@ -55,7 +55,7 @@ spry/                              (repository root)
 ├── scripts/                       # imperative glue the Makefile calls; each one is idempotent
 │   ├── deploy-backend.sh          # build image → push to ECR (tag = git SHA) → update stack → migrate
 │   ├── deploy-frontend.sh         # vite build against BACKEND_URL → s3 sync → CloudFront invalidation
-│   ├── domain-*.sh                # ACM certificate + DNS records for the custom domains
+│   ├── domain.sh                  # ACM certificate (DNS-validated) + the CNAMEs to add for app./api.
 │   ├── destroy-*.sh               # tear down what deploy created
 │   └── github-role.sh             # create/update the OIDC role
 │

@@ -2,7 +2,7 @@ COMPOSE := docker compose
 
 .PHONY: help lock up down clean logs ps test lint fmt migrate revision shell-db \
 	deploy-backend destroy-backend logs-backend migrate-backend \
-	cert domain deploy-frontend destroy-frontend github-role
+	domain-cert domain-dns deploy-frontend destroy-frontend github-role
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
@@ -68,11 +68,11 @@ migrate-backend: ## Re-run migrations on the deployed backend
 	aws lambda invoke --function-name $${PROJECT_NAME:-spry}-backend \
 		--cli-binary-format raw-in-base64-out --payload '{"action":"migrate"}' /dev/stdout
 
-cert: ## ACM certificate: make cert DOMAIN=app.example.com
-	./scripts/domain-frontend.sh cert
+domain-cert: ## ACM certificate for app.<d> + api.<d>; prints validation CNAMEs: make domain-cert DOMAIN=spry.pp.ua
+	./scripts/domain.sh cert
 
-domain: ## Custom domain for the frontend: make domain DOMAIN=app.example.com
-	./scripts/domain-frontend.sh domain
+domain-dns: ## Print the routing CNAMEs (app/api -> CloudFront) and check they resolve
+	./scripts/domain.sh dns
 
 deploy-frontend: ## vite build against BACKEND_URL -> S3 -> CloudFront invalidation
 	./scripts/deploy-frontend.sh

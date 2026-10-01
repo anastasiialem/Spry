@@ -19,3 +19,6 @@ dist/
 .idea/
 .vscode/
 .DS_Store
+
+# pnpm store created by a containerised build
+.pnpm-store/
