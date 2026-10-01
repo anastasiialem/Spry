@@ -46,6 +46,28 @@ fi
 
 SUBJECT_CLAIM="${GITHUB_SUBJECT_CLAIM:-ref:refs/heads/main}"
 
+# Since 2026-07-15 new repositories put immutable ids in the sub claim:
+# repo:owner@<owner_id>/name@<repo_id>:ref:... Look the ids up so the role
+# trusts exactly this repository, even if a same-named one appears later.
+REPO_IMMUTABLE="${GITHUB_REPO_IMMUTABLE:-}"
+if [[ -z "${REPO_IMMUTABLE}" ]]; then
+  REPO_JSON="$( (command -v gh >/dev/null 2>&1 && gh api "repos/${REPO}" 2>/dev/null) \
+    || curl -fsS "https://api.github.com/repos/${REPO}" 2>/dev/null || true)"
+  REPO_IMMUTABLE="$(printf '%s' "${REPO_JSON}" | python3 -c '
+import json, sys
+try:
+    r = json.load(sys.stdin)
+    print("%s@%s/%s@%s" % (r["owner"]["login"], r["owner"]["id"], r["name"], r["id"]))
+except Exception:
+    pass' )"
+fi
+if [[ -n "${REPO_IMMUTABLE}" ]]; then
+  log "also trusting the immutable form repo:${REPO_IMMUTABLE}:${SUBJECT_CLAIM}"
+else
+  warn "could not look up the repository ids (private repo without gh?) - set"
+  warn "GITHUB_REPO_IMMUTABLE=owner@<owner_id>/repo@<repo_id> in .env and re-run"
+fi
+
 log "repository ${REPO}"
 log "trusting only runs matching repo:${REPO}:${SUBJECT_CLAIM}"
 
@@ -71,6 +93,7 @@ if ! aws cloudformation deploy \
   --parameter-overrides \
     "ProjectName=${PROJECT_NAME}" \
     "GitHubRepo=${REPO}" \
+    "GitHubRepoImmutable=${REPO_IMMUTABLE}" \
     "SubjectClaim=${SUBJECT_CLAIM}" \
     "ExistingProviderArn=${EXISTING_PROVIDER}" \
   --capabilities CAPABILITY_NAMED_IAM \

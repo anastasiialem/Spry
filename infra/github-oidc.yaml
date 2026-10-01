@@ -19,6 +19,15 @@ Parameters:
     Description: owner/repo, e.g. anastasiialem/Spry
     AllowedPattern: "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
 
+  GitHubRepoImmutable:
+    Type: String
+    Default: ""
+    Description: >-
+      The same repository with GitHub's immutable ids, owner@<id>/repo@<id>.
+      Repositories created after 2026-07-15 put this form in the token's sub
+      claim; the script looks the ids up and passes them here.
+    AllowedPattern: "^$|^[A-Za-z0-9_.-]+@[0-9]+/[A-Za-z0-9_.-]+@[0-9]+$"
+
   SubjectClaim:
     Type: String
     Default: "ref:refs/heads/main"
@@ -36,6 +45,7 @@ Parameters:
 
 Conditions:
   CreateProvider: !Equals [!Ref ExistingProviderArn, ""]
+  HasImmutableRepo: !Not [!Equals [!Ref GitHubRepoImmutable, ""]]
 
 Resources:
   # Thumbprints are no longer what AWS checks for this issuer - it validates
@@ -79,7 +89,13 @@ Resources:
                 token.actions.githubusercontent.com:aud: sts.amazonaws.com
               StringLike:
                 # And without this, any repository on GitHub would do.
-                token.actions.githubusercontent.com:sub: !Sub "repo:${GitHubRepo}:${SubjectClaim}"
+                # Two spellings of the same repo + branch: the immutable-id
+                # form (repos created after 2026-07-15) and the classic one.
+                token.actions.githubusercontent.com:sub: !If
+                  - HasImmutableRepo
+                  - - !Sub "repo:${GitHubRepoImmutable}:${SubjectClaim}"
+                    - !Sub "repo:${GitHubRepo}:${SubjectClaim}"
+                  - !Sub "repo:${GitHubRepo}:${SubjectClaim}"
       Policies:
         # Deliberately not AdministratorAccess. Scoped to the services the
         # deploy actually drives, and to this project's names where the API
@@ -239,8 +255,11 @@ Outputs:
     Value: !GetAtt DeployRole.Arn
 
   Subject:
-    Description: The only OIDC subject allowed to assume the role.
-    Value: !Sub "repo:${GitHubRepo}:${SubjectClaim}"
+    Description: The OIDC subject allowed to assume the role.
+    Value: !If
+      - HasImmutableRepo
+      - !Sub "repo:${GitHubRepoImmutable}:${SubjectClaim}"
+      - !Sub "repo:${GitHubRepo}:${SubjectClaim}"
 
   ProviderArn:
     Value: !If
