@@ -1,23 +1,23 @@
 AWSTemplateFormatVersion: "2010-09-09"
 
 Description: >-
-  Peach frontend on CloudFront: a private S3 bucket holding the Next.js static
-  export, reachable only through the distribution. Deployed by
+  Spry frontend on CloudFront: a private S3 bucket holding the Vite build
+  (dist/), reachable only through the distribution. Deployed by
   scripts/deploy-frontend.sh, which builds the site and syncs it into the bucket.
 
   Optionally on a custom domain (make domain DOMAIN=app.example.com): the
-  distribution takes the alias and an ACM certificate from us-east-1. Only the
-  frontend takes a custom domain; the API stays on its Lambda function URL.
+  distribution takes the alias and an ACM certificate from us-east-1. The API
+  gets its own domain in infra/backend.yaml.
 
   Built to stay free: CloudFront's always-free tier covers 1 TB/month out and
   10M requests, and nothing here uses a paid extra (no WAF, logging, Lambda@Edge,
-  Origin Shield or dedicated IP). CloudFront Functions get 2M invocations free
-  a month, and each deploy uses one of the 1,000 free invalidation paths.
+  Origin Shield or dedicated IP), and each deploy uses one of the 1,000 free
+  invalidation paths.
 
 Parameters:
   ProjectName:
     Type: String
-    Default: peach
+    Default: spry
 
   DefaultRootObject:
     Type: String
@@ -27,8 +27,7 @@ Parameters:
     Type: String
     Default: ""
     Description: >-
-      Optional custom domain, e.g. app.example.com. Managed by
-      scripts/domain-frontend.sh (make domain).
+      Optional custom domain, e.g. app.example.com (step 6).
 
   HostedZoneId:
     Type: String
@@ -42,7 +41,7 @@ Parameters:
     Default: ""
     Description: >-
       ACM certificate for DomainName. CloudFront only accepts certificates from
-      us-east-1. `make cert` fills this in.
+      us-east-1.
 
 Conditions:
   # A domain without a certificate is ignored rather than half-applied.
@@ -107,31 +106,6 @@ Resources:
         SigningBehavior: always
         SigningProtocol: sigv4
 
-  # A static export puts /items at items.html, but the browser asks for /items.
-  # S3 has no notion of "try adding .html", so the rewrite happens at the edge.
-  RewriteFunction:
-    Type: AWS::CloudFront::Function
-    Properties:
-      Name: !Sub "${ProjectName}-frontend-rewrite"
-      AutoPublish: true
-      FunctionConfig:
-        Comment: Map clean URLs onto the static export's file names
-        Runtime: cloudfront-js-2.0
-      FunctionCode: |
-        function handler(event) {
-          var request = event.request;
-          var uri = request.uri;
-          if (uri === '/') {
-            request.uri = '/index.html';
-          } else if (uri.endsWith('/')) {
-            // The export writes items.html, not items/index.html.
-            request.uri = uri.slice(0, -1) + '.html';
-          } else if (!uri.split('/').pop().includes('.')) {
-            request.uri = uri + '.html';
-          }
-          return request;
-        }
-
   Distribution:
     Type: AWS::CloudFront::Distribution
     Properties:
@@ -166,18 +140,17 @@ Resources:
           # Managed-CachingOptimized: honours the Cache-Control the deploy
           # script puts on each object, so hashed assets pin and HTML does not.
           CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
-          FunctionAssociations:
-            - EventType: viewer-request
-              FunctionARN: !GetAtt RewriteFunction.FunctionMetadata.FunctionARN
         CustomErrorResponses:
-          # With origin access control a missing key comes back as 403, not 404.
+          # A single-page app: any path the bucket does not have is the app's
+          # own route, so serve index.html. With origin access control a
+          # missing key comes back as 403, not 404.
           - ErrorCode: 403
-            ResponseCode: 404
-            ResponsePagePath: /404.html
+            ResponseCode: 200
+            ResponsePagePath: /index.html
             ErrorCachingMinTTL: 10
           - ErrorCode: 404
-            ResponseCode: 404
-            ResponsePagePath: /404.html
+            ResponseCode: 200
+            ResponsePagePath: /index.html
             ErrorCachingMinTTL: 10
       Tags:
         - Key: PROJECT_NAME

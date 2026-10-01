@@ -1,7 +1,7 @@
 AWSTemplateFormatVersion: "2010-09-09"
 
 Description: >-
-  Peach backend on AWS Lambda: the FastAPI app in a container image, served over
+  Spry backend on AWS Lambda: the FastAPI app in a container image, served over
   HTTPS by a Lambda function URL, with Postgres on Aurora Serverless v2 that
   pauses to zero ACUs when idle. Deployed by scripts/deploy-backend.sh, which
   builds and pushes the image first - the ECR repository lives outside this
@@ -11,13 +11,14 @@ Description: >-
   and the cluster pauses after SecondsUntilAutoPause without connections. The
   first request after a pause waits roughly 15 seconds for it to resume.
 
-  No custom domain: the API is served on the function URL's own HTTPS name.
-  Only the frontend takes a custom domain.
+  A function URL cannot carry a custom domain, so when ApiDomainName and
+  ApiCertificateArn are set a CloudFront distribution (no caching) sits in front
+  of it and answers on api.<domain> with the ACM certificate.
 
 Parameters:
   ProjectName:
     Type: String
-    Default: peach
+    Default: spry
     Description: Prefix for every resource name, and the project tag.
 
   VpcId:
@@ -33,7 +34,7 @@ Parameters:
 
   ImageUri:
     Type: String
-    Description: Fully qualified image, e.g. <account>.dkr.ecr.<region>.amazonaws.com/peach-backend:abc1234
+    Description: Fully qualified image, e.g. <account>.dkr.ecr.<region>.amazonaws.com/spry-backend:abc1234
 
   Architecture:
     Type: String
@@ -58,11 +59,11 @@ Parameters:
 
   DbName:
     Type: String
-    Default: peach
+    Default: spry
 
   DbUsername:
     Type: String
-    Default: peach
+    Default: spry
 
   DbPassword:
     Type: String
@@ -118,29 +119,35 @@ Parameters:
     Default: "*"
     Description: Comma-separated browser origins; set this to the deployed frontend URL.
 
-  CognitoUserPoolId:
+  ApiDomainName:
+    Type: String
+    Default: ""
+    Description: Optional custom domain for the API, e.g. api.example.com (step 6).
+
+  ApiCertificateArn:
+    Type: String
+    Default: ""
+    Description: ACM certificate for ApiDomainName. Must be in us-east-1 (CloudFront).
+
+  HostedZoneId:
     Type: String
     Default: ""
     Description: >-
-      From make deploy-cognito. Empty means no pool: every protected endpoint
-      then answers 503, never an open door.
-
-  CognitoClientId:
-    Type: String
-    Default: ""
-    Description: The web app client; tokens minted for any other client are refused.
-
-  CognitoJwks:
-    Type: String
-    Default: ""
-    Description: >-
-      The pool's public signing keys, as JSON. The function has no internet
-      route to fetch them, so the deploy script downloads and passes them in.
+      Route 53 zone holding ApiDomainName. Set, the stack owns the alias
+      records; empty, you create the CNAME wherever your DNS lives.
 
   LogRetentionDays:
     Type: Number
     Default: 7
     Description: CloudWatch gives 5 GB of ingestion and storage free each month.
+
+Conditions:
+  HasApiDomain: !And
+    - !Not [!Equals [!Ref ApiDomainName, ""]]
+    - !Not [!Equals [!Ref ApiCertificateArn, ""]]
+  HasApiDnsZone: !And
+    - !Condition HasApiDomain
+    - !Not [!Equals [!Ref HostedZoneId, ""]]
 
 Resources:
   # --- networking ---------------------------------------------------------
@@ -298,10 +305,6 @@ Resources:
           APP_ENV: !Ref AppEnv
           LOG_LEVEL: !Ref LogLevel
           CORS_ORIGINS: !Ref CorsOrigins
-          COGNITO_REGION: !Ref AWS::Region
-          COGNITO_USER_POOL_ID: !Ref CognitoUserPoolId
-          COGNITO_CLIENT_ID: !Ref CognitoClientId
-          COGNITO_JWKS: !Ref CognitoJwks
           # No pool: warm but idle environments would keep connections open,
           # and Aurora only pauses once there are none.
           DB_POOLING: "false"
@@ -339,12 +342,90 @@ Resources:
       Principal: "*"
       InvokedViaFunctionUrl: true
 
+  # --- custom domain (optional, step 6) -----------------------------------
+
+  # CloudFront in front of the function URL: it terminates HTTPS for
+  # api.<domain> with our ACM certificate and forwards everything, uncached.
+  ApiDistribution:
+    Type: AWS::CloudFront::Distribution
+    Condition: HasApiDomain
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: !Sub "${ProjectName} api"
+        PriceClass: PriceClass_100
+        HttpVersion: http2and3
+        IPV6Enabled: true
+        Aliases: [!Ref ApiDomainName]
+        ViewerCertificate:
+          AcmCertificateArn: !Ref ApiCertificateArn
+          SslSupportMethod: sni-only
+          MinimumProtocolVersion: TLSv1.2_2021
+        Origins:
+          - Id: lambda
+            DomainName: !Select [2, !Split ["/", !GetAtt FunctionUrl.FunctionUrl]]
+            CustomOriginConfig:
+              OriginProtocolPolicy: https-only
+              OriginSSLProtocols: [TLSv1.2]
+              OriginReadTimeout: 30
+        DefaultCacheBehavior:
+          TargetOriginId: lambda
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods: [GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE]
+          CachedMethods: [GET, HEAD]
+          Compress: true
+          # Managed-CachingDisabled: an API answer is never served from cache.
+          CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+          # Managed-AllViewerExceptHostHeader: query, headers (Origin for CORS,
+          # Content-Type for uploads) pass through; Host must stay the URL's own.
+          OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
+      Tags:
+        - Key: PROJECT_NAME
+          Value: !Ref ProjectName
+
+  ApiDnsRecord:
+    Type: AWS::Route53::RecordSet
+    Condition: HasApiDnsZone
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Ref ApiDomainName
+      Type: A
+      AliasTarget:
+        DNSName: !GetAtt ApiDistribution.DomainName
+        HostedZoneId: Z2FDTNDATAQYW2
+        EvaluateTargetHealth: false
+
+  ApiDnsRecordIpv6:
+    Type: AWS::Route53::RecordSet
+    Condition: HasApiDnsZone
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Ref ApiDomainName
+      Type: AAAA
+      AliasTarget:
+        DNSName: !GetAtt ApiDistribution.DomainName
+        HostedZoneId: Z2FDTNDATAQYW2
+        EvaluateTargetHealth: false
+
 Outputs:
   ApiUrl:
     Description: Base URL of the backend, with no trailing slash.
     Value: !Sub
       - "https://${Host}"
       - Host: !Select [2, !Split ["/", !GetAtt FunctionUrl.FunctionUrl]]
+
+  PublicApiUrl:
+    Description: What the frontend should call - the custom domain when set.
+    Value: !If
+      - HasApiDomain
+      - !Sub "https://${ApiDomainName}"
+      - !Sub
+        - "https://${Host}"
+        - Host: !Select [2, !Split ["/", !GetAtt FunctionUrl.FunctionUrl]]
+
+  ApiDistributionDomainName:
+    Description: Point api.<domain> here (CNAME) when DNS is not in Route 53.
+    Value: !If [HasApiDomain, !GetAtt ApiDistribution.DomainName, "none"]
 
   FunctionName:
     Value: !Ref Function

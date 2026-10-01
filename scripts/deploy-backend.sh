@@ -37,7 +37,7 @@ for var in AWS_PROFILE AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
   [[ -n "${!var:-}" ]] || unset "${var}"
 done
 
-PROJECT_NAME="${PROJECT_NAME:-peach}"
+PROJECT_NAME="${PROJECT_NAME:-spry}"
 STACK_NAME="${STACK_NAME:-${PROJECT_NAME}-backend}"
 AWS_REGION="${AWS_REGION:-${AWS_DEFAULT_REGION:-us-east-1}}"
 export AWS_DEFAULT_REGION="${AWS_REGION}"
@@ -192,22 +192,6 @@ alphabet = string.ascii_letters + string.digits + "-_.~"
 print("".join(secrets.choice(alphabet) for _ in range(40)))')"
 fi
 
-# --- cognito ----------------------------------------------------------------
-
-# The function cannot reach the internet, so it cannot fetch the pool's signing
-# keys itself; download them here and hand them over as a parameter. Without a
-# pool id (CI has no .env) the stack keeps the keys it already has.
-COGNITO_JWKS=""
-if [[ -n "${COGNITO_USER_POOL_ID:-}" ]]; then
-  JWKS_URL="https://cognito-idp.${COGNITO_REGION:-${AWS_REGION}}.amazonaws.com/${COGNITO_USER_POOL_ID}/.well-known/jwks.json"
-  log "fetching signing keys for ${COGNITO_USER_POOL_ID}"
-  COGNITO_JWKS="$(curl -fsS --max-time 20 "${JWKS_URL}" \
-    | python3 -c 'import json,sys; print(json.dumps(json.load(sys.stdin), separators=(",", ":")))')" \
-    || die "could not fetch ${JWKS_URL} - is COGNITO_USER_POOL_ID right? (make deploy-cognito)"
-else
-  warn "COGNITO_USER_POOL_ID unset - keeping the stack's current Cognito settings"
-fi
-
 # --- deploy -----------------------------------------------------------------
 
 # Parameters go through a 0600 file rather than argv, so the password never
@@ -224,8 +208,8 @@ IMAGE_URI="${IMAGE_URI}" \
 CFN_ARCHITECTURE="${CFN_ARCHITECTURE}" \
 MEMORY_SIZE="${LAMBDA_MEMORY_SIZE:-}" \
 TIMEOUT_SECONDS="${LAMBDA_TIMEOUT_SECONDS:-}" \
-DB_NAME="${DB_NAME:-${POSTGRES_DB:-peach}}" \
-DB_USERNAME="${DB_USERNAME:-${POSTGRES_USER:-peach}}" \
+DB_NAME="${DB_NAME:-spry}" \
+DB_USERNAME="${DB_USERNAME:-spry}" \
 DB_PASSWORD="${DB_PASSWORD}" \
 DB_ENGINE_VERSION="${DB_ENGINE_VERSION:-}" \
 DB_MIN_CAPACITY="${DB_MIN_CAPACITY:-}" \
@@ -234,9 +218,9 @@ DB_SECONDS_UNTIL_AUTO_PAUSE="${DB_SECONDS_UNTIL_AUTO_PAUSE:-}" \
 APP_ENV="${APP_ENV_AWS:-production}" \
 LOG_LEVEL="${LOG_LEVEL:-info}" \
 CORS_ORIGINS="${API_CORS_ORIGINS:-}" \
-COGNITO_USER_POOL_ID="${COGNITO_USER_POOL_ID:-}" \
-COGNITO_CLIENT_ID="${COGNITO_CLIENT_ID:-}" \
-COGNITO_JWKS="${COGNITO_JWKS}" \
+API_DOMAIN_NAME="${API_DOMAIN_NAME:-}" \
+API_CERTIFICATE_ARN="${API_CERTIFICATE_ARN:-}" \
+HOSTED_ZONE_ID="${HOSTED_ZONE_ID:-}" \
 python3 - "${PARAMS_FILE}" <<'PY'
 import json, os, sys
 
@@ -258,9 +242,9 @@ params = {
     "AppEnv": os.environ["APP_ENV"],
     "LogLevel": os.environ["LOG_LEVEL"],
     "CorsOrigins": os.environ["CORS_ORIGINS"],
-    "CognitoUserPoolId": os.environ["COGNITO_USER_POOL_ID"],
-    "CognitoClientId": os.environ["COGNITO_CLIENT_ID"],
-    "CognitoJwks": os.environ["COGNITO_JWKS"],
+    "ApiDomainName": os.environ["API_DOMAIN_NAME"],
+    "ApiCertificateArn": os.environ["API_CERTIFICATE_ARN"],
+    "HostedZoneId": os.environ["HOSTED_ZONE_ID"],
 }
 # An empty value means "leave this alone": CloudFormation reuses the stack's
 # existing value for any parameter the deploy does not mention, and falls back
@@ -327,7 +311,8 @@ fi
 
 # --- report -----------------------------------------------------------------
 
-API_URL="$(outputs ApiUrl)"
+# The custom domain (api.<domain>) once step 6 has set it up, else the function URL.
+API_URL="$(outputs PublicApiUrl)"
 API_URL="${API_URL%/}"
 
 # deploy-frontend.sh compiles the bundle against this.
@@ -335,6 +320,7 @@ env_set BACKEND_URL "${API_URL}"
 
 echo
 echo "  api        ${API_URL}"
+echo "  image      ${IMAGE_URI}"
 echo "  health     ${API_URL}/health"
 echo "  docs       ${API_URL}/docs"
 echo "  database   $(outputs DatabaseEndpoint)"

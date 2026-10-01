@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Build the Next.js static export and put it behind CloudFront.
+# Build the Vite bundle and put it behind CloudFront (private S3 bucket).
 #
-# The API URL is compiled into the bundle - NEXT_PUBLIC_* is substituted at
-# build time, not read at runtime - so this builds against BACKEND_URL from
-# .env, which scripts/deploy-backend.sh writes. Deploy the backend first.
+# The API URL is compiled into the bundle - VITE_* is substituted at build
+# time, not read at runtime - so this builds against BACKEND_URL from .env,
+# which scripts/deploy-backend.sh writes. Deploy the backend first.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -31,45 +31,26 @@ for var in AWS_PROFILE AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
   [[ -n "${!var:-}" ]] || unset "${var}"
 done
 
-PROJECT_NAME="${PROJECT_NAME:-peach}"
+PROJECT_NAME="${PROJECT_NAME:-spry}"
 STACK_NAME="${FRONTEND_STACK_NAME:-${PROJECT_NAME}-frontend}"
 AWS_REGION="${AWS_REGION:-${AWS_DEFAULT_REGION:-us-east-1}}"
 export AWS_DEFAULT_REGION="${AWS_REGION}"
 
 # --- preflight --------------------------------------------------------------
 
-for tool in aws node; do
-  command -v "${tool}" >/dev/null 2>&1 || die "${tool} is required but not installed"
-done
+command -v aws >/dev/null 2>&1 || die "aws cli is required but not installed"
 aws sts get-caller-identity >/dev/null 2>&1 \
-  || die "no usable AWS credentials - set AWS_PROFILE or the AWS_* keys in .env"
-
-# package.json pins pnpm, which may or may not be on PATH.
-if command -v pnpm >/dev/null 2>&1; then
-  PM=(pnpm)
-elif command -v corepack >/dev/null 2>&1; then
-  PM=(corepack pnpm)
-else
-  PM=(npx --yes pnpm@10)
-fi
+  || die "no usable AWS credentials - run aws configure (or set AWS_PROFILE)"
 
 # --- which API does this build talk to? -------------------------------------
 
-# NEXT_PUBLIC_API_URL in .env points at localhost for Compose; it is not what a
-# deployed bundle should be compiled against. BACKEND_URL is.
+# VITE_API_URL in .env points at localhost for Compose; a deployed bundle is
+# compiled against BACKEND_URL instead.
 API_URL="${BACKEND_URL:-}"
 API_URL="${API_URL%/}"
 [[ -n "${API_URL}" ]] || die "BACKEND_URL is not set in .env - run make deploy-backend first"
-
-log "building against ${API_URL}"
-
-# The Cognito ids are compiled in too; without them nobody could sign in.
-[[ -n "${COGNITO_CLIENT_ID:-}" && -n "${COGNITO_DOMAIN:-}" ]] \
-  || die "COGNITO_CLIENT_ID / COGNITO_DOMAIN are not set in .env - run make deploy-cognito first"
-
-# The function URL is always HTTPS; plain HTTP here means a hand-edited .env.
-[[ "${API_URL}" == https://* ]] \
-  || die "BACKEND_URL must be https:// - browsers block an HTTPS page calling HTTP"
+# An HTTPS page may not call an HTTP API; plain HTTP here means a hand-edited .env.
+[[ "${API_URL}" == https://* ]] || die "BACKEND_URL must be https://"
 
 # --- infrastructure ---------------------------------------------------------
 
@@ -79,11 +60,17 @@ else
   log "updating ${STACK_NAME}"
 fi
 
+# Empty values are left out, so CloudFormation keeps what the stack already has
+# (CI has no .env, and must not drop the custom domain).
+PARAMS=("ProjectName=${PROJECT_NAME}")
+[[ -n "${APP_DOMAIN_NAME:-}" ]] && PARAMS+=("DomainName=${APP_DOMAIN_NAME}")
+[[ -n "${APP_CERTIFICATE_ARN:-}" ]] && PARAMS+=("AcmCertificateArn=${APP_CERTIFICATE_ARN}")
+[[ -n "${HOSTED_ZONE_ID:-}" ]] && PARAMS+=("HostedZoneId=${HOSTED_ZONE_ID}")
+
 if ! aws cloudformation deploy \
   --stack-name "${STACK_NAME}" \
   --template-file "${TEMPLATE}" \
-  --parameter-overrides \
-    "ProjectName=${PROJECT_NAME}" \
+  --parameter-overrides "${PARAMS[@]}" \
   --no-fail-on-empty-changeset \
   --tags "PROJECT_NAME=${PROJECT_NAME}"; then
   warn "deploy failed - most recent failure reasons:"
@@ -105,35 +92,43 @@ SITE_URL="$(outputs SiteUrl)"
 
 # --- build ------------------------------------------------------------------
 
-log "installing dependencies"
-(cd "${APP}" && "${PM[@]}" install --frozen-lockfile)
-
-log "building the static export"
-rm -rf "${APP}/out"
-(cd "${APP}" && NEXT_OUTPUT=export \
-  NEXT_PUBLIC_API_URL="${API_URL}" \
-  NEXT_PUBLIC_COGNITO_REGION="${COGNITO_REGION:-${AWS_REGION}}" \
-  NEXT_PUBLIC_COGNITO_CLIENT_ID="${COGNITO_CLIENT_ID}" \
-  NEXT_PUBLIC_COGNITO_DOMAIN="${COGNITO_DOMAIN}" \
-  NEXT_PUBLIC_COGNITO_GOOGLE_ENABLED="${COGNITO_GOOGLE_ENABLED:-false}" \
-  "${PM[@]}" build)
-[[ -f "${APP}/out/index.html" ]] || die "the export produced no out/index.html"
+log "building against ${API_URL}"
+export COREPACK_ENABLE_DOWNLOAD_PROMPT=0
+rm -rf "${APP}/dist"
+if command -v pnpm >/dev/null 2>&1 || command -v corepack >/dev/null 2>&1; then
+  # A local Node toolchain (CI, or a laptop that has one).
+  PM=(pnpm); command -v pnpm >/dev/null 2>&1 || PM=(corepack pnpm)
+  (cd "${APP}" && "${PM[@]}" install --frozen-lockfile && VITE_API_URL="${API_URL}" "${PM[@]}" build)
+else
+  # No Node here: build in the same node image Compose uses. node_modules
+  # goes into a named volume so Linux binaries never land in the host folder.
+  command -v docker >/dev/null 2>&1 || die "need either pnpm/corepack or docker to build"
+  log "no local Node - building inside node:22-alpine"
+  docker run --rm \
+    -v "${APP}:/app" \
+    -v "${PROJECT_NAME}_build_node_modules:/app/node_modules" \
+    -w /app \
+    -e COREPACK_ENABLE_DOWNLOAD_PROMPT=0 \
+    -e VITE_API_URL="${API_URL}" \
+    node:22-alpine \
+    sh -c "corepack enable && pnpm install --frozen-lockfile && pnpm build"
+fi
+[[ -f "${APP}/dist/index.html" ]] || die "the build produced no dist/index.html"
 
 # --- upload -----------------------------------------------------------------
 
-# Hashed assets first and without --delete: a client mid-navigation may still
-# be asking for the previous build's chunks. They are immutable, so the edge
-# and the browser may keep them forever.
+# Hashed assets first and without --delete: a browser still on the previous
+# build may ask for its chunks. They never change, so they cache for a year.
 log "uploading to s3://${BUCKET}"
-aws s3 sync "${APP}/out/_next/static" "s3://${BUCKET}/_next/static" \
+aws s3 sync "${APP}/dist/assets" "s3://${BUCKET}/assets" \
   --cache-control "public,max-age=31536000,immutable" \
   --only-show-errors
 
-# Then everything else, which must never be cached hard or a deploy would not
-# be visible until the TTL expired.
-aws s3 sync "${APP}/out" "s3://${BUCKET}" \
+# Everything else (index.html, images) must revalidate, or a deploy would not
+# be visible until a TTL ran out.
+aws s3 sync "${APP}/dist" "s3://${BUCKET}" \
   --delete \
-  --exclude "_next/static/*" \
+  --exclude "assets/*" \
   --cache-control "public,max-age=0,must-revalidate" \
   --only-show-errors
 
@@ -150,15 +145,10 @@ aws cloudfront wait invalidation-completed \
 
 echo
 echo "  site       ${SITE_URL}"
-echo "  items      ${SITE_URL}/items"
 echo "  api        ${API_URL}"
 echo "  bucket     s3://${BUCKET}"
 echo
-
-echo "If this was the first frontend deploy, run make deploy-cognito again so"
-echo "Google sign-in may redirect back to ${SITE_URL}."
-echo
-echo "Now allow the site's origin through CORS:"
-echo
-echo "  API_CORS_ORIGINS=${SITE_URL}   in .env, then: make deploy-backend"
+echo "Allow the site's origin through CORS: put"
+echo "  API_CORS_ORIGINS=${SITE_URL}"
+echo "in .env and run make deploy-backend again."
 echo
