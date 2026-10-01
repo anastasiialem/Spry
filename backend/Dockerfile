@@ -65,5 +65,9 @@ RUN --mount=from=ghcr.io/astral-sh/uv:0.9,source=/uv,target=/bin/uv \
 COPY app ${LAMBDA_TASK_ROOT}/app
 COPY migrations ${LAMBDA_TASK_ROOT}/migrations
 COPY alembic.ini ${LAMBDA_TASK_ROOT}/
+# Lambda runs the code as a non-root user. Make it readable whatever permissions
+# the files had on the build machine (a 0600 checkout would otherwise fail
+# with "Permission denied: /var/task/app/__init__.py").
+RUN chmod -R a+rX ${LAMBDA_TASK_ROOT}/app ${LAMBDA_TASK_ROOT}/migrations ${LAMBDA_TASK_ROOT}/alembic.ini
 
 CMD ["app.lambda_handler.handler"]
