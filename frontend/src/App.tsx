@@ -1,4 +1,4 @@
-import { ChevronRight, Plus, Table2 } from "lucide-react";
+import { Plus, Table2 } from "lucide-react";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
@@ -7,8 +7,13 @@ import { MeetingPeek } from "@/components/meeting-peek";
 import { MeetingStats } from "@/components/meeting-stats";
 import { MeetingTable } from "@/components/meeting-table";
 import { Schedule } from "@/components/schedule";
+import { SiteHeader } from "@/components/site-header";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
+import { usePath } from "@/lib/router";
+import { CallbackPage } from "@/pages/callback-page";
+import { LoginPage } from "@/pages/login-page";
+import { PrivacyPage } from "@/pages/privacy-page";
 
 function Flower({ className }: { className?: string }) {
   return (
@@ -16,7 +21,7 @@ function Flower({ className }: { className?: string }) {
   );
 }
 
-export default function App() {
+function MeetingsPage() {
   const [formOpen, setFormOpen] = useState(false);
   const [openId, setOpenId] = useState<number | null>(null);
 
@@ -28,18 +33,7 @@ export default function App() {
 
   return (
     <div className="min-h-svh">
-      {/* Notion-style top bar with a breadcrumb */}
-      <header className="sticky top-0 z-20 border-b bg-background/85 backdrop-blur">
-        <nav
-          aria-label="Breadcrumb"
-          className="flex h-11 items-center gap-1 px-4 text-sm"
-        >
-          <img src="/images/magnolia.png" alt="" className="h-5 w-auto" />
-          <span className="font-medium">Spry</span>
-          <ChevronRight className="size-3.5 text-muted-foreground" />
-          <span className="text-muted-foreground">Meetings</span>
-        </nav>
-      </header>
+      <SiteHeader page="Meetings" />
 
       {/* Cover photo */}
       <div className="relative h-56 overflow-hidden">
@@ -106,4 +100,12 @@ export default function App() {
       )}
     </div>
   );
+}
+
+export default function App() {
+  const path = usePath();
+  if (path.startsWith("/login")) return <LoginPage />;
+  if (path.startsWith("/auth/callback")) return <CallbackPage />;
+  if (path.startsWith("/privacy")) return <PrivacyPage />;
+  return <MeetingsPage />;
 }

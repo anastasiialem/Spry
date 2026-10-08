@@ -19,10 +19,12 @@ Why one repository and not three: see [`docs/decisions/0001-monorepo.md`](docs/d
 - The frontend has one page that lists meetings, a form that adds a new one, a status
   picker per meeting, a schedule panel, and a side panel to edit a meeting and manage its
   files.
+- Sign-in (Lab 3): Amazon Cognito managed login with email + password (self sign-up on) and
+  "Continue with Google"; the header shows who is signed in. See §9.
 - `docker compose up --build` is the only command a new developer runs (after installing
   Docker Desktop).
 
-**Out of scope — do not add:** authentication, users, deleting meetings, object storage (S3) for attachments, Redis or any
+**Out of scope — do not add:** API authorization (the API stays public for now), per-user data, deleting meetings, object storage (S3) for attachments, Redis or any
 cache, message queues, Celery or background workers, nginx or any reverse proxy, Kubernetes,
 a second database, server-side rendering.
 
@@ -48,11 +50,13 @@ spry/                              (repository root)
 │   └── deploy.yml                 # on push to main: lint, then make deploy-backend / deploy-frontend
 │
 ├── infra/                         # CloudFormation templates — the AWS resources, declared
+│   ├── auth.yaml                  # Cognito user pool, Google IdP, public app client, managed login
 │   ├── backend.yaml               # ECR image → Lambda + function URL, RDS PostgreSQL 17, VPC wiring
 │   ├── frontend.yaml              # private S3 bucket + CloudFront (+ ACM cert / custom domain)
 │   └── github-oidc.yaml           # IAM role GitHub Actions assumes via OIDC (no access keys)
 │
 ├── scripts/                       # imperative glue the Makefile calls; each one is idempotent
+│   ├── deploy-auth.sh             # auth stack (Google secret as a NoEcho parameter, never in git)
 │   ├── deploy-backend.sh          # build image → push to ECR (tag = git SHA) → update stack → migrate
 │   ├── deploy-frontend.sh         # vite build against BACKEND_URL → s3 sync → CloudFront invalidation
 │   ├── domain.sh                  # ACM certificate (DNS-validated) + the CNAMEs to add for app./api.
@@ -342,3 +346,36 @@ browser ──HTTPS──> api.<domain> ─> CloudFront ─> Lambda function URL
 - CI: `.github/workflows/deploy.yml` on push to `main` runs lint, then the same `make` targets,
   with credentials from OIDC (`aws-actions/configure-aws-credentials@v4`), trust policy limited
   to `repo:<owner>/<repo>:ref:refs/heads/main`.
+
+---
+
+## 9. Sign-in (Amazon Cognito)
+
+```
+browser ─/login/─> Cognito managed login (spry-anastasiia.auth.us-east-1.amazoncognito.com)
+                     ├─ email + password (sign-up, email code)
+                     └─ Continue with Google ──> Google ──> Cognito /oauth2/idpresponse
+        <─ /auth/callback/?code=&state= ── code + PKCE verifier exchanged for tokens in the browser
+```
+
+- **`infra/auth.yaml`** (stack `spry-auth`, `make deploy-auth`): user pool (sign-in with email,
+  email auto-verified, self sign-up on, Essentials tier), Google identity provider (scopes
+  `openid email profile`, `email`/`email_verified`/`name` mapped), a **public** app client
+  (no secret, code flow, PKCE), domain prefix `spry-anastasiia` with managed login v2 and the
+  default branding.
+- **Callback URLs** (exact, trailing slash): `<origin>/auth/callback/` and logout `<origin>/` for
+  `https://app.spry.pp.ua`, the CloudFront name and `http://localhost:5173`.
+- **Secrets:** `GOOGLE_CLIENT_SECRET` lives in `.env` (gitignored) and goes to CloudFormation as a
+  `NoEcho` parameter. The frontend needs no secret: authority, client id and domain are public
+  and come from the stack's outputs at build time (`deploy-frontend.sh`), never by copy-paste.
+- **Frontend:** `react-oidc-context` + `oidc-client-ts`.
+  - `/login/` starts the redirect (`signinRedirect()`); this is the URL to hand out, because the
+    library must store `state` and the PKCE verifier before leaving the site.
+  - `/auth/callback/` exchanges the code and returns to `/`.
+  - Header: **Sign in** / **Google** (skips Cognito's page via `identity_provider=Google`) when
+    signed out; email + **Sign out** when signed in. Sign-out clears the local session, then
+    goes to Cognito's `/logout?client_id=…&logout_uri=…` (Cognito has no OIDC end-session).
+  - `/privacy/` — privacy policy linked from Google's consent screen.
+- A build without the Cognito variables (plain `docker compose up` before `make deploy-auth`)
+  simply has no sign-in.
+

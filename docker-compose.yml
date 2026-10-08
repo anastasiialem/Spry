@@ -53,6 +53,10 @@ services:
     environment:
       # Read by the browser, so it is the host's address, not http://backend:8000.
       VITE_API_URL: ${VITE_API_URL:-http://localhost:8000}
+      # Written to .env by make deploy-auth; empty means "no sign-in".
+      VITE_COGNITO_AUTHORITY: ${COGNITO_AUTHORITY:-}
+      VITE_COGNITO_CLIENT_ID: ${COGNITO_CLIENT_ID:-}
+      VITE_COGNITO_DOMAIN: ${COGNITO_DOMAIN:-}
     ports:
       - "${FRONTEND_PORT:-5173}:5173"
     volumes:

@@ -90,6 +90,25 @@ BUCKET="$(outputs BucketName)"
 DISTRIBUTION_ID="$(outputs DistributionId)"
 SITE_URL="$(outputs SiteUrl)"
 
+# --- sign-in settings, straight from the auth stack (never copy-pasted) ----
+
+auth_output() {
+  aws cloudformation describe-stacks --stack-name "${PROJECT_NAME}-auth" \
+    --query "Stacks[0].Outputs[?OutputKey=='$1'].OutputValue" --output text 2>/dev/null || true
+}
+COGNITO_AUTHORITY="$(auth_output Authority)"
+COGNITO_CLIENT_ID="$(auth_output ClientId)"
+COGNITO_DOMAIN="$(auth_output Domain)"
+if [[ -z "${COGNITO_CLIENT_ID}" || "${COGNITO_CLIENT_ID}" == "None" ]]; then
+  warn "no ${PROJECT_NAME}-auth stack - building without sign-in (make deploy-auth)"
+  COGNITO_AUTHORITY=""; COGNITO_CLIENT_ID=""; COGNITO_DOMAIN=""
+else
+  log "sign-in via ${COGNITO_DOMAIN} (client ${COGNITO_CLIENT_ID})"
+fi
+export VITE_COGNITO_AUTHORITY="${COGNITO_AUTHORITY}"
+export VITE_COGNITO_CLIENT_ID="${COGNITO_CLIENT_ID}"
+export VITE_COGNITO_DOMAIN="${COGNITO_DOMAIN}"
+
 # --- build ------------------------------------------------------------------
 
 log "building against ${API_URL}"
@@ -113,6 +132,9 @@ else
     -w /app \
     -e COREPACK_ENABLE_DOWNLOAD_PROMPT=0 \
     -e VITE_API_URL="${API_URL}" \
+    -e VITE_COGNITO_AUTHORITY \
+    -e VITE_COGNITO_CLIENT_ID \
+    -e VITE_COGNITO_DOMAIN \
     node:22-alpine \
     sh -c "corepack enable && pnpm install --frozen-lockfile && pnpm build"
 fi

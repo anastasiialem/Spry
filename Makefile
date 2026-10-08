@@ -82,3 +82,6 @@ destroy-frontend: ## Delete the bucket and distribution
 
 github-role: ## IAM role GitHub Actions assumes via OIDC
 	./scripts/github-role.sh
+
+deploy-auth: ## Cognito user pool + Google sign-in (infra/auth.yaml)
+	./scripts/deploy-auth.sh
