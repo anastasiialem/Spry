@@ -67,8 +67,14 @@ Resources:
         RecoveryMechanisms:
           - Name: verified_email
             Priority: 1
+      # Required attributes are asked on the managed sign-up form. They can only
+      # be set when the pool is created - adding one later replaces the pool.
       Schema:
         - Name: email
+          AttributeDataType: String
+          Required: true
+          Mutable: true
+        - Name: preferred_username
           AttributeDataType: String
           Required: true
           Mutable: true
@@ -94,6 +100,8 @@ Resources:
         email: email
         email_verified: email_verified
         name: name
+        # Required in this pool, so a Google user needs one too: their Google name.
+        preferred_username: name
         username: sub
 
   UserPoolClient:
@@ -134,6 +142,8 @@ Resources:
       ManagedLoginVersion: 2
 
   # Without a branding style a version-2 domain has no sign-in page to show.
+  # Starts from Cognito's defaults; deploy-auth.sh then adds the page background
+  # image through the API (merging into these settings).
   ManagedLoginBranding:
     Type: AWS::Cognito::ManagedLoginBranding
     DependsOn: UserPoolDomain
@@ -145,6 +155,9 @@ Resources:
 Outputs:
   UserPoolId:
     Value: !Ref UserPool
+
+  ManagedLoginBrandingId:
+    Value: !GetAtt ManagedLoginBranding.ManagedLoginBrandingId
 
   ClientId:
     Value: !Ref UserPoolClient

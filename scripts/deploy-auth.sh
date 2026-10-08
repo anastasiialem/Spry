@@ -41,7 +41,8 @@ PREFIX="${COGNITO_DOMAIN_PREFIX:-}"
   || die "set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in .env (Google Cloud -> Clients)"
 
 # Exact URLs, trailing slash included: the frontend sends
-#   redirect_uri = <origin>/auth/callback/    and    logout_uri = <origin>/
+#   redirect_uri = <origin>/auth/callback/    and    logout_uri = <origin>/login/
+# (signing out lands on /login/, which goes straight back to the sign-in page)
 ORIGINS=()
 [[ -n "${APP_DOMAIN_NAME:-}" ]] && ORIGINS+=("https://${APP_DOMAIN_NAME}")
 SITE_CF="$(aws cloudformation describe-stacks --stack-name "${PROJECT_NAME}-frontend" \
@@ -51,7 +52,9 @@ SITE_CF="$(aws cloudformation describe-stacks --stack-name "${PROJECT_NAME}-fron
 ORIGINS+=("http://localhost:${FRONTEND_PORT:-5173}")
 
 CALLBACKS="$(printf '%s/auth/callback/,' "${ORIGINS[@]}")"; CALLBACKS="${CALLBACKS%,}"
-LOGOUTS="$(printf '%s/,' "${ORIGINS[@]}")"; LOGOUTS="${LOGOUTS%,}"
+LOGOUTS=""
+for origin in "${ORIGINS[@]}"; do LOGOUTS+="${origin}/,${origin}/login/,"; done
+LOGOUTS="${LOGOUTS%,}"
 log "callback URLs: ${CALLBACKS}"
 
 PARAMS_FILE="$(mktemp)"; chmod 600 "${PARAMS_FILE}"
@@ -111,6 +114,49 @@ PY
 env_set COGNITO_AUTHORITY "$(out Authority)"
 env_set COGNITO_CLIENT_ID "$(out ClientId)"
 env_set COGNITO_DOMAIN "$(out Domain)"
+
+# --- managed login: page background ------------------------------------------
+# CloudFormation creates the default style; the background image goes on top
+# through the API: read the full current settings, switch the page background
+# image on, upload the image. Re-running replaces it.
+BG="${ROOT}/infra/assets/login-background.jpg"
+if [[ -f "${BG}" ]]; then
+  log "setting the sign-in page background (${BG#"${ROOT}"/})"
+  POOL_ID="$(out UserPoolId)" CLIENT_ID="$(out ClientId)" BRANDING_ID="$(out ManagedLoginBrandingId)" \
+  BG="${BG}" python3 - <<'PY' || warn "could not set the background - the sign-in page still works"
+import base64, json, os, subprocess, tempfile
+
+def aws(*args):
+    return json.loads(subprocess.check_output(["aws", "cognito-idp", *args, "--output", "json"]))
+
+current = aws("describe-managed-login-branding",
+              "--user-pool-id", os.environ["POOL_ID"],
+              "--managed-login-branding-id", os.environ["BRANDING_ID"],
+              "--return-merged-resources")["ManagedLoginBranding"]
+settings = current.get("Settings") or {}
+page = settings.setdefault("components", {}).setdefault("pageBackground", {})
+page.setdefault("image", {})["enabled"] = True
+
+asset = {
+    "Category": "PAGE_BACKGROUND",
+    "ColorMode": "DYNAMIC",
+    "Extension": "JPEG",
+    "Bytes": base64.b64encode(open(os.environ["BG"], "rb").read()).decode(),
+}
+request = {
+    "UserPoolId": os.environ["POOL_ID"],
+    "ManagedLoginBrandingId": os.environ["BRANDING_ID"],
+    "UseCognitoProvidedValues": False,
+    "Settings": settings,
+    "Assets": [asset],
+}
+with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as fh:
+    json.dump(request, fh)
+subprocess.check_call(["aws", "cognito-idp", "update-managed-login-branding",
+                       "--cli-input-json", f"file://{fh.name}"], stdout=subprocess.DEVNULL)
+os.unlink(fh.name)
+PY
+fi
 
 echo
 echo "  user pool   $(out UserPoolId)"

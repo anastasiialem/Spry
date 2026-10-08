@@ -362,8 +362,11 @@ browser ─/login/─> Cognito managed login (spry-anastasiia.auth.us-east-1.ama
   email auto-verified, self sign-up on, Essentials tier), Google identity provider (scopes
   `openid email profile`, `email`/`email_verified`/`name` mapped), a **public** app client
   (no secret, code flow, PKCE), domain prefix `spry-anastasiia` with managed login v2 and the
-  default branding.
-- **Callback URLs** (exact, trailing slash): `<origin>/auth/callback/` and logout `<origin>/` for
+  default branding plus a page background image (`infra/assets/login-background.jpg`, applied by
+  `deploy-auth.sh` through the managed-login branding API). Sign-up asks for email, password and
+  a **username** (`preferred_username`, required; for Google users it is mapped from their name).
+- **Callback URLs** (exact, trailing slash): `<origin>/auth/callback/` and logout `<origin>/login/`
+  (signing out lands back on the sign-in page) and `<origin>/` for
   `https://app.spry.pp.ua`, the CloudFront name and `http://localhost:5173`.
 - **Secrets:** `GOOGLE_CLIENT_SECRET` lives in `.env` (gitignored) and goes to CloudFormation as a
   `NoEcho` parameter. The frontend needs no secret: authority, client id and domain are public
@@ -373,7 +376,7 @@ browser ─/login/─> Cognito managed login (spry-anastasiia.auth.us-east-1.ama
     library must store `state` and the PKCE verifier before leaving the site.
   - `/auth/callback/` exchanges the code and returns to `/`.
   - Header: **Sign in** / **Google** (skips Cognito's page via `identity_provider=Google`) when
-    signed out; email + **Sign out** when signed in. Sign-out clears the local session, then
+    signed out; username · email + **Sign out** when signed in. Sign-out clears the local session, then
     goes to Cognito's `/logout?client_id=…&logout_uri=…` (Cognito has no OIDC end-session).
   - `/privacy/` — privacy policy linked from Google's consent screen.
 - A build without the Cognito variables (plain `docker compose up` before `make deploy-auth`)

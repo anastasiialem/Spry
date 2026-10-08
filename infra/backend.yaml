@@ -78,14 +78,14 @@ Parameters:
   DbInstanceClass:
     Type: String
     Default: db.t4g.micro
-    Description: db.t4g.micro / db.t3.micro are covered by the free tier.
+    Description: Smallest Graviton class, ~$0.016/h (free tier only on pre-2025-07-15 accounts).
 
   DbAllocatedStorage:
     Type: Number
     Default: 20
     MinValue: 20
     MaxValue: 20
-    Description: GB. The free tier covers 20 GB of General Purpose storage.
+    Description: GB of gp2 - the minimum RDS allows.
 
   DbBackupRetentionDays:
     Type: Number

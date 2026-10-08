@@ -30,12 +30,13 @@ export function oidcConfig(onSignedIn: () => void): AuthProviderProps {
 
 /**
  * Cognito has no standard OIDC end-session endpoint: clear the local session
- * first, then send the browser to Cognito's own /logout.
+ * first, then send the browser to Cognito's own /logout. It returns to
+ * /login/, which goes straight back to the sign-in page.
  */
 export function cognitoLogoutUrl(): string {
   const params = new URLSearchParams({
     client_id: clientId!,
-    logout_uri: `${window.location.origin}/`,
+    logout_uri: `${window.location.origin}/login/`,
   });
   return `${domain}/logout?${params}`;
 }

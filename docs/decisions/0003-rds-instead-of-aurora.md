@@ -25,14 +25,16 @@ subnets, reachable only from the Lambda's security group).
 - **Nothing else changes.** Same VPC layout, same password-based `DATABASE_URL`, same
   migrations, same code. Swapping Aurora for RDS is two resources in `infra/backend.yaml`.
 - **Same engine as local.** `postgres:17-alpine` in Compose ↔ RDS PostgreSQL 17 on AWS.
-- **Free.** db.t4g.micro + 20 GB is covered by the free tier.
+- **Cheap and predictable.** db.t4g.micro is $0.016/h (~$11.7/month) + 20 GB gp2 (~$2.3). The
+  12-month RDS free tier applies only to accounts created before 15 July 2025; this account is
+  newer, so the instance is paid from the sign-up credits.
 - **Private stays private.** Express Aurora would put the database on the internet behind IAM
   tokens; a lab app gains nothing from that exposure.
 
 ## What it costs
 
-- No scale-to-zero: the instance runs 24/7 (covered by the free tier while it lasts — tear it
-  down with `make destroy-backend` after the lab).
+- No scale-to-zero: the instance bills 24/7 (~$14/month from the credits) whether anyone uses
+  the app or not - tear it down with `make destroy-backend` after the course.
 - Single-AZ, no automatic failover; ~80 connections max, which is why the Lambda opens a
   connection per request (`DB_POOLING=false`) instead of pooling per environment.
 

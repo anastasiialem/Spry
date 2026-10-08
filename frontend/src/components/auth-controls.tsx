@@ -35,17 +35,24 @@ function SignedInOrOut() {
   }
 
   if (auth.isAuthenticated) {
-    const email = auth.user?.profile.email ?? "signed in";
+    const email = auth.user?.profile.email ?? "";
+    const username = auth.user?.profile.preferred_username ?? email;
     return (
       <div className="flex items-center gap-2">
         <span
           aria-hidden
           className="grid size-6 place-items-center rounded-full bg-accent text-xs font-semibold text-accent-foreground uppercase"
         >
-          {email.charAt(0)}
+          {username.charAt(0)}
         </span>
-        <span className="max-w-48 truncate text-sm" title={email}>
-          {email}
+        <span
+          className="hidden max-w-56 truncate text-sm sm:inline"
+          title={email}
+        >
+          <span className="font-medium">{username}</span>
+          {email && email !== username && (
+            <span className="text-muted-foreground"> · {email}</span>
+          )}
         </span>
         <Button
           variant="ghost"
