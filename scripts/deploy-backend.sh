@@ -192,6 +192,30 @@ alphabet = string.ascii_letters + string.digits + "-_.~"
 print("".join(secrets.choice(alphabet) for _ in range(40)))')"
 fi
 
+# --- sign-in: which user pool's tokens the API accepts ---------------------
+
+# Read from the auth stack (make deploy-auth), never typed in. The function has
+# no internet route, so the pool's public keys are fetched here and passed in.
+# No auth stack (or CI without it): leave the parameters out, and the stack
+# keeps whatever it already has.
+auth_output() {
+  aws cloudformation describe-stacks --stack-name "${PROJECT_NAME}-auth" \
+    --query "Stacks[0].Outputs[?OutputKey=='$1'].OutputValue" --output text 2>/dev/null || true
+}
+COGNITO_USER_POOL_ID="$(auth_output UserPoolId)"
+COGNITO_CLIENT_ID="$(auth_output ClientId)"
+COGNITO_JWKS=""
+if [[ -n "${COGNITO_USER_POOL_ID}" && "${COGNITO_USER_POOL_ID}" != "None" ]]; then
+  JWKS_URL="https://cognito-idp.${AWS_REGION}.amazonaws.com/${COGNITO_USER_POOL_ID}/.well-known/jwks.json"
+  log "API will accept tokens from ${COGNITO_USER_POOL_ID} (client ${COGNITO_CLIENT_ID})"
+  COGNITO_JWKS="$(curl -fsS --max-time 20 "${JWKS_URL}" \
+    | python3 -c 'import json,sys; print(json.dumps(json.load(sys.stdin), separators=(",", ":")))')" \
+    || die "could not fetch ${JWKS_URL}"
+else
+  warn "no ${PROJECT_NAME}-auth stack - keeping the API's current sign-in settings"
+  COGNITO_USER_POOL_ID=""; COGNITO_CLIENT_ID=""
+fi
+
 # --- deploy -----------------------------------------------------------------
 
 # Parameters go through a 0600 file rather than argv, so the password never
@@ -219,6 +243,9 @@ CORS_ORIGINS="${API_CORS_ORIGINS:-}" \
 API_DOMAIN_NAME="${API_DOMAIN_NAME:-}" \
 API_CERTIFICATE_ARN="${API_CERTIFICATE_ARN:-}" \
 HOSTED_ZONE_ID="${HOSTED_ZONE_ID:-}" \
+COGNITO_USER_POOL_ID="${COGNITO_USER_POOL_ID}" \
+COGNITO_CLIENT_ID="${COGNITO_CLIENT_ID}" \
+COGNITO_JWKS="${COGNITO_JWKS}" \
 python3 - "${PARAMS_FILE}" <<'PY'
 import json, os, sys
 
@@ -241,6 +268,9 @@ params = {
     "ApiDomainName": os.environ["API_DOMAIN_NAME"],
     "ApiCertificateArn": os.environ["API_CERTIFICATE_ARN"],
     "HostedZoneId": os.environ["HOSTED_ZONE_ID"],
+    "CognitoUserPoolId": os.environ["COGNITO_USER_POOL_ID"],
+    "CognitoClientId": os.environ["COGNITO_CLIENT_ID"],
+    "CognitoJwks": os.environ["COGNITO_JWKS"],
 }
 # An empty value means "leave this alone": CloudFormation reuses the stack's
 # existing value for any parameter the deploy does not mention, and falls back

@@ -83,6 +83,7 @@ if ! aws cloudformation deploy \
   --template-file "${TEMPLATE}" \
   --parameter-overrides "file://${PARAMS_FILE}" \
   --no-fail-on-empty-changeset \
+  --capabilities CAPABILITY_IAM \
   --tags "PROJECT_NAME=${PROJECT_NAME}"; then
   warn "deploy failed - most recent failure reasons:"
   aws cloudformation describe-stack-events --stack-name "${STACK_NAME}" --max-items 30 \
@@ -137,24 +138,35 @@ settings = current.get("Settings") or {}
 page = settings.setdefault("components", {}).setdefault("pageBackground", {})
 page.setdefault("image", {})["enabled"] = True
 
-asset = {
-    "Category": "PAGE_BACKGROUND",
-    "ColorMode": "DYNAMIC",
-    "Extension": "JPEG",
-    "Bytes": base64.b64encode(open(os.environ["BG"], "rb").read()).decode(),
-}
+# One copy per colour mode: the default style ships its own LIGHT and DARK
+# page backgrounds, and a DYNAMIC asset does not replace them.
+data = base64.b64encode(open(os.environ["BG"], "rb").read()).decode()
+assets = [
+    {"Category": "PAGE_BACKGROUND", "ColorMode": mode, "Extension": "JPEG", "Bytes": data}
+    for mode in ("LIGHT", "DARK")
+]
+# Only our own assets: the merged defaults include button icons for providers
+# this pool does not have (Apple, Facebook, Amazon), which the API rejects.
 request = {
     "UserPoolId": os.environ["POOL_ID"],
     "ManagedLoginBrandingId": os.environ["BRANDING_ID"],
     "UseCognitoProvidedValues": False,
     "Settings": settings,
-    "Assets": [asset],
+    "Assets": assets,
 }
 with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as fh:
     json.dump(request, fh)
-subprocess.check_call(["aws", "cognito-idp", "update-managed-login-branding",
-                       "--cli-input-json", f"file://{fh.name}"], stdout=subprocess.DEVNULL)
-os.unlink(fh.name)
+try:
+    subprocess.check_call(["aws", "cognito-idp", "update-managed-login-branding",
+                           "--cli-input-json", f"file://{fh.name}"], stdout=subprocess.DEVNULL)
+finally:
+    os.unlink(fh.name)
+
+after = aws("describe-managed-login-branding",
+            "--user-pool-id", os.environ["POOL_ID"],
+            "--managed-login-branding-id", os.environ["BRANDING_ID"])["ManagedLoginBranding"]
+bgs = [f"{a['ColorMode']}" for a in after.get("Assets") or [] if a["Category"] == "PAGE_BACKGROUND"]
+print("    page background set for:", ", ".join(bgs) or "nothing (!)")
 PY
 fi
 

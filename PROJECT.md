@@ -24,7 +24,7 @@ Why one repository and not three: see [`docs/decisions/0001-monorepo.md`](docs/d
 - `docker compose up --build` is the only command a new developer runs (after installing
   Docker Desktop).
 
-**Out of scope — do not add:** API authorization (the API stays public for now), per-user data, deleting meetings, object storage (S3) for attachments, Redis or any
+**Out of scope — do not add:** sharing meetings between users, roles/admins, deleting meetings, object storage (S3) for attachments, Redis or any
 cache, message queues, Celery or background workers, nginx or any reverse proxy, Kubernetes,
 a second database, server-side rendering.
 
@@ -146,6 +146,18 @@ fail with `503` instead of hanging, and `restart: unless-stopped` restarts a cra
 Base URL: `http://localhost:8000` locally, `https://api.<domain>` deployed. JSON only,
 `Content-Type: application/json`. Errors use FastAPI's shape `{"detail": ...}`.
 
+**Authentication.** Every `/api/*` route needs `Authorization: Bearer <Cognito access token>`;
+`/`, `/health` and `/docs` stay public. The API checks the RS256 signature against the pool's
+JWKS (cached for an hour, refetched on an unknown `kid`; on Lambda passed in as `COGNITO_JWKS`
+because the function has no internet route), `exp`, `iss`, `token_use == "access"` and
+`client_id`. Missing or bad token → `401` with `WWW-Authenticate: Bearer`.
+No pool configured: development and tests run as the single user `local-dev`; production
+answers `503` — a missing setting never leaves the API open.
+
+**Ownership.** Each meeting stores its creator's Cognito `sub` (`owner_sub`); every query is
+scoped to the caller. Someone else's meeting or attachment answers `404`, exactly like a
+missing one, so ids reveal nothing.
+
 ### `GET /`
 `307` redirect to `/docs` (Swagger UI), so the bare API address is never a 404. Not in the
 OpenAPI schema.
@@ -228,6 +240,7 @@ Datetimes without a timezone are rejected (`422`); the client always sends UTC.
 | `ends_at` | `timestamptz` | not null, `CHECK (ends_at > starts_at)` |
 | `attendee_count` | `integer` | not null, `CHECK (attendee_count BETWEEN 1 AND 1000)` |
 | `status` | `varchar(20)` | not null, default `'not_started'`, `CHECK (status IN ('not_started','in_progress','done'))` |
+| `owner_sub` | `varchar(64)` | not null, indexed — Cognito `sub` of the creator (`0004_meeting_owner`; older rows become `'unclaimed'`) |
 
 ### Database table `attachments`
 
@@ -381,4 +394,16 @@ browser ─/login/─> Cognito managed login (spry-anastasiia.auth.us-east-1.ama
   - `/privacy/` — privacy policy linked from Google's consent screen.
 - A build without the Cognito variables (plain `docker compose up` before `make deploy-auth`)
   simply has no sign-in.
+- **The meetings page requires sign-in** (when the build has Cognito settings): signed out, it
+  shows a "Sign in" prompt instead of data. Every API call sends the **access token** (read from
+  the session `oidc-client-ts` keeps in `localStorage`); file downloads are fetched with the
+  token and saved, because a plain link cannot carry it.
+- **Backend:** `app/auth.py` verifies the token (see §4); `deploy-backend.sh` reads the pool id
+  and client id from the `spry-auth` stack and passes the pool's JWKS to the Lambda.
+- **One email, one account:** a Cognito pre sign-up trigger (`LinkAccountsFunction` in
+  `infra/auth.yaml`) links the first Google sign-in to an existing password account with the
+  same email, so both ways sign in as the same user (same `sub`, same meetings). It links only
+  when the email is verified on both sides (Google's `email_verified`, and the code the
+  password user confirmed). A password sign-up for an email that already uses Google is
+  refused with a hint to use "Sign in with Google".
 

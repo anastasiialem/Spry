@@ -4,6 +4,7 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Response, status
 
+from app.auth import CurrentUser
 from app.db import SessionDep
 from app.services import attachments as attachments_service
 
@@ -15,8 +16,12 @@ def _not_found() -> HTTPException:
 
 
 @router.get("/{attachment_id}", summary="Download a file", response_class=Response)
-async def download_attachment(attachment_id: int, session: SessionDep) -> Response:
-    attachment = await attachments_service.get_attachment(session, attachment_id, with_data=True)
+async def download_attachment(
+    attachment_id: int, session: SessionDep, user: CurrentUser
+) -> Response:
+    attachment = await attachments_service.get_attachment(
+        session, user, attachment_id, with_data=True
+    )
     if attachment is None:
         raise _not_found()
     return Response(
@@ -31,8 +36,8 @@ async def download_attachment(attachment_id: int, session: SessionDep) -> Respon
 
 
 @router.delete("/{attachment_id}", status_code=status.HTTP_204_NO_CONTENT, summary="Delete a file")
-async def delete_attachment(attachment_id: int, session: SessionDep) -> Response:
-    attachment = await attachments_service.get_attachment(session, attachment_id)
+async def delete_attachment(attachment_id: int, session: SessionDep, user: CurrentUser) -> Response:
+    attachment = await attachments_service.get_attachment(session, user, attachment_id)
     if attachment is None:
         raise _not_found()
     await attachments_service.delete_attachment(session, attachment)

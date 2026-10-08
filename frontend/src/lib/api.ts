@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { getAccessToken } from "@/lib/auth";
+
 /** Compiled in by Vite at build time (dev server: read from the environment). */
 const API_URL = (
   import.meta.env.VITE_API_URL ?? "http://localhost:8000"
@@ -58,20 +60,38 @@ export class ApiError extends Error {
   }
 }
 
+/** Every API call carries the access token; the API answers 401 without it. */
+function authHeaders(): Record<string, string> {
+  const token = getAccessToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+async function send(path: string, init?: RequestInit): Promise<Response> {
+  let response: Response;
+  try {
+    response = await fetch(`${API_URL}${path}`, {
+      ...init,
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeaders(),
+        ...init?.headers,
+      },
+    });
+  } catch {
+    throw new ApiError(0, "Could not reach the API");
+  }
+  if (response.status === 401) {
+    throw new ApiError(401, "Your session has expired - please sign in again");
+  }
+  return response;
+}
+
 async function request<T>(
   path: string,
   schema: z.ZodType<T>,
   init?: RequestInit,
 ): Promise<T> {
-  let response: Response;
-  try {
-    response = await fetch(`${API_URL}${path}`, {
-      ...init,
-      headers: { "Content-Type": "application/json", ...init?.headers },
-    });
-  } catch {
-    throw new ApiError(0, "Could not reach the API");
-  }
+  const response = await send(path, init);
 
   if (!response.ok) {
     const body = await response.json().catch(() => null);
@@ -125,5 +145,16 @@ export const api = {
     ),
   deleteAttachment: (id: number) =>
     request(`/api/attachments/${id}`, z.undefined(), { method: "DELETE" }),
-  attachmentUrl: (id: number) => `${API_URL}/api/attachments/${id}`,
+  /** A plain link cannot send the token, so fetch the file and save it. */
+  downloadAttachment: async (id: number, filename: string) => {
+    const response = await send(`/api/attachments/${id}`);
+    if (!response.ok) throw new ApiError(response.status, "Download failed");
+    const url = URL.createObjectURL(await response.blob());
+    const link = Object.assign(document.createElement("a"), {
+      href: url,
+      download: filename,
+    });
+    link.click();
+    URL.revokeObjectURL(url);
+  },
 };

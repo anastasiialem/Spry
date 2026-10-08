@@ -107,6 +107,25 @@ Parameters:
     Default: "*"
     Description: Comma-separated browser origins; set this to the deployed frontend URL.
 
+  CognitoUserPoolId:
+    Type: String
+    Default: ""
+    Description: >-
+      From the spry-auth stack. Empty: every /api route answers 503 in
+      production - never an open door.
+
+  CognitoClientId:
+    Type: String
+    Default: ""
+    Description: Access tokens issued to any other app client are refused.
+
+  CognitoJwks:
+    Type: String
+    Default: ""
+    Description: >-
+      The pool's public signing keys (JSON). The function has no route to the
+      internet to fetch them, so the deploy script downloads and passes them.
+
   ApiDomainName:
     Type: String
     Default: ""
@@ -280,6 +299,10 @@ Resources:
           APP_ENV: !Ref AppEnv
           LOG_LEVEL: !Ref LogLevel
           CORS_ORIGINS: !Ref CorsOrigins
+          COGNITO_REGION: !Ref AWS::Region
+          COGNITO_USER_POOL_ID: !Ref CognitoUserPoolId
+          COGNITO_CLIENT_ID: !Ref CognitoClientId
+          COGNITO_JWKS: !Ref CognitoJwks
           # No pool: many warm Lambda environments each holding a connection
           # would exhaust a micro instance's connection limit.
           DB_POOLING: "false"

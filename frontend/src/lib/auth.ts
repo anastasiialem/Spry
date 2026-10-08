@@ -1,4 +1,4 @@
-import { WebStorageStateStore } from "oidc-client-ts";
+import { User, WebStorageStateStore } from "oidc-client-ts";
 import type { AuthProviderProps } from "react-oidc-context";
 
 /*
@@ -26,6 +26,22 @@ export function oidcConfig(onSignedIn: () => void): AuthProviderProps {
     userStore: new WebStorageStateStore({ store: window.localStorage }),
     onSigninCallback: onSignedIn,
   };
+}
+
+/**
+ * The signed-in user's access token, for the API (not the ID token: that one
+ * says who the user is to the frontend; the access token is what an API
+ * accepts). Read from the same storage the AuthProvider writes, so plain
+ * functions outside React can use it.
+ */
+export function getAccessToken(): string | null {
+  if (!authEnabled) return null;
+  const stored = window.localStorage.getItem(
+    `oidc.user:${authority}:${clientId}`,
+  );
+  if (!stored) return null;
+  const user = User.fromStorageString(stored);
+  return user.expired ? null : user.access_token;
 }
 
 /**

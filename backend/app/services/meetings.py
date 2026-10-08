@@ -20,15 +20,23 @@ def _attachment_count():
     )
 
 
-async def list_meetings(session: AsyncSession) -> list[tuple[Meeting, int]]:
+# Every query is scoped to one owner: someone else's meeting looks exactly like
+# a missing one (404), so ids reveal nothing about other users.
+
+
+async def list_meetings(session: AsyncSession, owner: str) -> list[tuple[Meeting, int]]:
     result = await session.execute(
-        select(Meeting, _attachment_count()).order_by(Meeting.starts_at, Meeting.id)
+        select(Meeting, _attachment_count())
+        .where(Meeting.owner_sub == owner)
+        .order_by(Meeting.starts_at, Meeting.id)
     )
     return [(meeting, count) for meeting, count in result.all()]
 
 
-async def get_meeting(session: AsyncSession, meeting_id: int) -> Meeting | None:
-    return await session.get(Meeting, meeting_id)
+async def get_meeting(session: AsyncSession, owner: str, meeting_id: int) -> Meeting | None:
+    return await session.scalar(
+        select(Meeting).where(Meeting.id == meeting_id, Meeting.owner_sub == owner)
+    )
 
 
 async def count_attachments(session: AsyncSession, meeting_id: int) -> int:
@@ -38,8 +46,8 @@ async def count_attachments(session: AsyncSession, meeting_id: int) -> int:
     return count or 0
 
 
-async def create_meeting(session: AsyncSession, payload: MeetingCreate) -> Meeting:
-    meeting = Meeting(**payload.model_dump())
+async def create_meeting(session: AsyncSession, owner: str, payload: MeetingCreate) -> Meeting:
+    meeting = Meeting(owner_sub=owner, **payload.model_dump())
     session.add(meeting)
     await session.flush()
     await session.refresh(meeting)

@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import undefer
 
-from app.models import Attachment
+from app.models import Attachment, Meeting
 
 DEFAULT_CONTENT_TYPE = "application/octet-stream"
 
@@ -53,9 +53,14 @@ async def create_attachment(
 
 
 async def get_attachment(
-    session: AsyncSession, attachment_id: int, *, with_data: bool = False
+    session: AsyncSession, owner: str, attachment_id: int, *, with_data: bool = False
 ) -> Attachment | None:
-    query = select(Attachment).where(Attachment.id == attachment_id)
+    """Only attachments of the owner's own meetings; anything else is "not found"."""
+    query = (
+        select(Attachment)
+        .join(Meeting, Meeting.id == Attachment.meeting_id)
+        .where(Attachment.id == attachment_id, Meeting.owner_sub == owner)
+    )
     if with_data:
         query = query.options(undefer(Attachment.data))
     return await session.scalar(query)

@@ -125,13 +125,18 @@ function Files({ meetingId }: { meetingId: number }) {
                   {formatSize(file.size)}
                 </span>
               </div>
-              <Button variant="ghost" size="icon" className="size-8" asChild>
-                <a
-                  href={api.attachmentUrl(file.id)}
-                  aria-label={`Download ${file.filename}`}
-                >
-                  <Download />
-                </a>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-8"
+                aria-label={`Download ${file.filename}`}
+                onClick={() =>
+                  api
+                    .downloadAttachment(file.id, file.filename)
+                    .catch((e: Error) => setError(e.message))
+                }
+              >
+                <Download />
               </Button>
               <Button
                 variant="ghost"

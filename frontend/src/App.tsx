@@ -7,6 +7,7 @@ import { MeetingPeek } from "@/components/meeting-peek";
 import { MeetingStats } from "@/components/meeting-stats";
 import { MeetingTable } from "@/components/meeting-table";
 import { Schedule } from "@/components/schedule";
+import { RequireSignIn } from "@/components/require-sign-in";
 import { SiteHeader } from "@/components/site-header";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
@@ -107,5 +108,9 @@ export default function App() {
   if (path.startsWith("/login")) return <LoginPage />;
   if (path.startsWith("/auth/callback")) return <CallbackPage />;
   if (path.startsWith("/privacy")) return <PrivacyPage />;
-  return <MeetingsPage />;
+  return (
+    <RequireSignIn>
+      <MeetingsPage />
+    </RequireSignIn>
+  );
 }
