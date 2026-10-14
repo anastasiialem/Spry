@@ -108,9 +108,7 @@ async def test_empty_week(session: AsyncSession) -> None:
 
 
 def _sqs(*bodies: dict) -> dict:
-    return {
-        "Records": [{"eventSource": "aws:sqs", "body": json.dumps(body)} for body in bodies]
-    }
+    return {"Records": [{"eventSource": "aws:sqs", "body": json.dumps(body)} for body in bodies]}
 
 
 def test_detect_trigger() -> None:

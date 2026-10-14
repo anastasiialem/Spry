@@ -185,14 +185,16 @@ def render_csv(report: WeeklyReport) -> bytes:
     out.writerow([])
 
     out.writerow(["summary", cur.week, prev.week, "change"])
-    out.writerow(["meetings", cur.meetings, prev.meetings, _signed(cur.meetings - prev.meetings, integer=True)])
+    meetings_change = _signed(cur.meetings - prev.meetings, integer=True)
+    out.writerow(["meetings", cur.meetings, prev.meetings, meetings_change])
     out.writerow(["hours", _num(cur.hours), _num(prev.hours), _signed(cur.hours - prev.hours)])
     out.writerow([])
 
     out.writerow(["longest meetings"])
     out.writerow(["rank", "title", "starts at", "duration (h)", "participants"])
     for rank, m in enumerate(report.longest, start=1):
-        out.writerow([rank, m.title, m.starts_at.strftime("%Y-%m-%d %H:%M"), _num(m.hours), m.participants])
+        starts = m.starts_at.strftime("%Y-%m-%d %H:%M")
+        out.writerow([rank, m.title, starts, _num(m.hours), m.participants])
     out.writerow([])
 
     out.writerow(["per account"])
@@ -226,4 +228,5 @@ def build_weekly_report(week: str) -> bytes:
 
 if __name__ == "__main__":
     tz = get_settings().report_timezone
-    sys.stdout.write(build_weekly_report(sys.argv[1] if len(sys.argv) > 1 else previous_week(timezone=tz)).decode())
+    week = sys.argv[1] if len(sys.argv) > 1 else previous_week(timezone=tz)
+    sys.stdout.write(build_weekly_report(week).decode())

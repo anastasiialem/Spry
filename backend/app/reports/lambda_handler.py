@@ -71,6 +71,8 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         body = build_weekly_report(week)
         key = report_key(week)
         _upload(settings.reports_bucket, key, body)
-        log.info("report-builder wrote s3://%s/%s (%d bytes)", settings.reports_bucket, key, len(body))
+        log.info(
+            "report-builder wrote s3://%s/%s (%d bytes)", settings.reports_bucket, key, len(body)
+        )
         done.append({"week": week, "key": key})
     return {"reports": done}
