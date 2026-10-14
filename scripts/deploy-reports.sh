@@ -11,6 +11,8 @@
 #   REPORT_MAIL_DOMAIN=spry.pp.ua          defaults to DOMAIN_NAME
 #   REPORT_SCHEDULE="rate(5 minutes)"      for a test run; unset = Monday 07:00
 #   REPORT_FAIL_WEEK=2026-W13              lab exercise: that week fails -> DLQ
+#   REPORT_SENDER=you@example.com          send from this verified address instead of
+#                                          reports@<domain> (while DKIM is pending)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -128,7 +130,7 @@ PROJECT_NAME="${PROJECT_NAME}" VPC_ID="${VPC_ID}" SUBNET_IDS="${SUBNET_IDS}" SG_
 IMAGE_URI="${IMAGE_URI}" ARCHITECTURE="${ARCHITECTURE}" DATABASE_URL="${DATABASE_URL}" \
 CREATE_ENDPOINT="${CREATE_ENDPOINT}" ROUTE_TABLES="${ROUTE_TABLES}" MAIL_DOMAIN="${MAIL_DOMAIN}" \
 RECIPIENTS="${REPORT_RECIPIENTS:-}" SCHEDULE="${REPORT_SCHEDULE:-cron(0 7 ? * MON *)}" \
-FAIL_WEEK="${REPORT_FAIL_WEEK:-}" \
+FAIL_WEEK="${REPORT_FAIL_WEEK:-}" SENDER="${REPORT_SENDER:-}" \
 python3 - "${PARAMS_FILE}" <<'PY'
 import json, os, sys
 e = os.environ
@@ -147,9 +149,10 @@ params = {
     "ScheduleExpression": e["SCHEDULE"],
     # Always passed, empty included: leaving it out would keep a failure on.
     "ReportFailWeek": e["FAIL_WEEK"],
+    "SenderAddress": e["SENDER"],
 }
 out = [{"ParameterKey": k, "ParameterValue": v} for k, v in params.items()
-       if v != "" or k == "ReportFailWeek"]
+       if v != "" or k in ("ReportFailWeek", "SenderAddress")]
 # Not given (empty): `cloudformation deploy` keeps the stack's current value.
 json.dump(out, open(sys.argv[1], "w"))
 PY
