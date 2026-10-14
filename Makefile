@@ -2,7 +2,8 @@ COMPOSE := docker compose
 
 .PHONY: help lock up down clean logs ps test lint fmt migrate revision shell-db \
 	deploy-backend destroy-backend logs-backend migrate-backend \
-	domain-cert domain-dns deploy-frontend destroy-frontend github-role
+	domain-cert domain-dns deploy-frontend destroy-frontend github-role \
+	report-local deploy-reports report-now report-ls report-logs report-dlq
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
@@ -85,3 +86,23 @@ github-role: ## IAM role GitHub Actions assumes via OIDC
 
 deploy-auth: ## Cognito user pool + Google sign-in (infra/auth.yaml)
 	./scripts/deploy-auth.sh
+
+# --- weekly report (lab: background work) ---
+
+report-local: ## Build one week's CSV from the Compose database: make report-local WEEK=2026-W40
+	$(COMPOSE) exec backend python -m app.reports.weekly $(WEEK)
+
+deploy-reports: ## Schedule + SQS + builder/mailer Lambdas + bucket + SES (after deploy-backend)
+	./scripts/deploy-reports.sh
+
+report-now: ## Ask for a report now: make report-now WEEK=2026-W40 (no WEEK: last week)
+	./scripts/reports.sh now $(WEEK)
+
+report-ls: ## List the reports in S3
+	./scripts/reports.sh ls
+
+report-logs: ## The trigger lines of both report functions, last hour
+	./scripts/reports.sh logs
+
+report-dlq: ## Messages waiting in the dead-letter queue
+	./scripts/reports.sh dlq

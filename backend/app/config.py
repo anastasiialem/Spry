@@ -34,6 +34,14 @@ class Settings(BaseSettings):
     # internet to download them; empty elsewhere, and they are fetched.
     cognito_jwks: str = ""
 
+    # Weekly report (app/reports). The week runs Monday to Sunday in this zone.
+    report_timezone: str = "Europe/Kyiv"
+    # Where the report-builder Lambda writes reports/<week>.csv.
+    reports_bucket: str = ""
+    # Lab exercise: the builder raises for this one week, to watch a message
+    # go to the dead-letter queue after three attempts. Empty in normal use.
+    report_fail_week: str = ""
+
     @property
     def cognito_issuer(self) -> str:
         host = f"https://cognito-idp.{self.cognito_region}.amazonaws.com"

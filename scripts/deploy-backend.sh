@@ -334,6 +334,18 @@ if [[ -n "${FUNCTION_ERROR}" && "${FUNCTION_ERROR}" != "None" ]]; then
   die "migrations failed - see: make logs-backend"
 fi
 
+# --- weekly report builder ----------------------------------------------------
+
+# The report builder runs this same image (infra/reports.yaml). Roll it too,
+# so a push to main never leaves it on old code. No reports stack: nothing to do.
+BUILDER="${PROJECT_NAME}-report-builder"
+if aws lambda get-function --function-name "${BUILDER}" >/dev/null 2>&1; then
+  log "rolling ${BUILDER} to the new image"
+  aws lambda update-function-code --function-name "${BUILDER}" \
+    --image-uri "${IMAGE_URI}" --query LastUpdateStatus --output text >/dev/null
+  aws lambda wait function-updated-v2 --function-name "${BUILDER}"
+fi
+
 # --- report -----------------------------------------------------------------
 
 # The custom domain (api.<domain>) once step 6 has set it up, else the function URL.

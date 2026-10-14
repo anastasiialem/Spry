@@ -25,8 +25,8 @@ Why one repository and not three: see [`docs/decisions/0001-monorepo.md`](docs/d
   Docker Desktop).
 
 **Out of scope — do not add:** sharing meetings between users, roles/admins, deleting meetings, object storage (S3) for attachments, Redis or any
-cache, message queues, Celery or background workers, nginx or any reverse proxy, Kubernetes,
-a second database, server-side rendering.
+cache, Celery/RQ or self-hosted workers (background work is the AWS-managed weekly report in
+§10 only), nginx or any reverse proxy, Kubernetes, a second database, server-side rendering.
 
 ---
 
@@ -406,4 +406,50 @@ browser ─/login/─> Cognito managed login (spry-anastasiia.auth.us-east-1.ama
   when the email is verified on both sides (Google's `email_verified`, and the code the
   password user confirmed). A password sign-up for an email that already uses Google is
   refused with a hint to use "Sign in with Google".
+
+## 10. Weekly meetings report (event-driven, AWS)
+
+Every Monday 07:00 Europe/Kyiv the system builds last week's report, saves it to S3 and emails
+it. Nobody clicks anything. Template `infra/reports.yaml`, deployed by `make deploy-reports`
+(after `make deploy-backend`; it reads the VPC, subnets, security group, image and database URL
+from the `spry-backend` stack).
+
+```
+EventBridge Scheduler ─┐  {"week": null, "source": "schedule"}       (command)
+make report-now ───────┴─> SQS report-requests ──(3 receives)──> report-requests-dlq
+                                 │ event source mapping, BatchSize 1
+                                 v
+                 report-builder Lambda (backend image, in the VPC)
+                   reads RDS, writes reports/<week>.csv via the S3 gateway endpoint
+                                 │ s3:ObjectCreated (prefix reports/, suffix .csv)   (event)
+                                 v
+                 report-mailer Lambda (inline Python, outside the VPC) ──> SES ──> inbox
+```
+
+- **The report** — `app/reports/weekly.py`, `build_weekly_report(week) -> bytes`, no AWS in it.
+  For one ISO week (Monday–Sunday in Europe/Kyiv, all accounts): number of meetings and total
+  hours, the same for the week before and the change, the five longest meetings (title, start,
+  duration, participants = `attendee_count`), totals per account (`owner_sub`).
+  The week is always a parameter; the file is always `reports/<week>.csv`, and the CSV carries
+  no build timestamp, so rebuilding a week overwrites one identical file (idempotent).
+  Locally: `make report-local WEEK=2026-W40`.
+- **Builder** — `app/reports/lambda_handler.py`, same image as the API with
+  `ImageConfig.Command`. Accepts a direct invocation (`{"source": "schedule"}`) or an SQS event;
+  no week means the previous ISO week. Logs
+  `report-builder triggered trigger=<sqs|schedule|direct> source=<schedule|manual> week=<w>`.
+  `make deploy-backend` also rolls it to the new image.
+- **Queue** — visibility timeout 360 s = 6 × the builder's 60 s timeout; after 3 receives a
+  message moves to the DLQ (kept 14 days). `make report-now WEEK=…` sends
+  `{"week": "…", "source": "manual"}`.
+- **Mailer** — logs `report-mailer triggered trigger=s3 event=ObjectCreated:Put object=…`, reads
+  the file (s3:GetObject only — it never writes to `reports/`), sends it with
+  `sesv2.send_email` (raw MIME, CSV attached) from `reports@<domain>` to `REPORT_RECIPIENTS`.
+- **SES** — domain identity with DKIM (three CNAMEs at nic.ua); the account is in the sandbox,
+  so the recipient is verified as a second identity.
+- **Bucket** — `<project>-reports-<account>`, private, SSE-S3, objects under `reports/` expire
+  after 90 days. The name is built, not `!GetAtt`, to avoid the bucket ↔ permission cycle.
+- **Lab switches** (in `.env`, then `make deploy-reports`): `REPORT_SCHEDULE="rate(5 minutes)"`
+  for a test run of the schedule; `REPORT_FAIL_WEEK=2026-W13` makes that one week fail, to watch
+  it reach the DLQ. Unset both afterwards.
+- **Commands** — `make report-now`, `make report-ls`, `make report-logs`, `make report-dlq`.
 
