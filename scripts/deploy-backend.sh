@@ -346,6 +346,15 @@ if aws lambda get-function --function-name "${BUILDER}" >/dev/null 2>&1; then
   aws lambda wait function-updated-v2 --function-name "${BUILDER}"
 fi
 
+# The agenda parser (infra/ai.yml) too, for the same reason.
+PARSER="${PROJECT_NAME}-agenda-parser"
+if aws lambda get-function --function-name "${PARSER}" >/dev/null 2>&1; then
+  log "rolling ${PARSER} to the new image"
+  aws lambda update-function-code --function-name "${PARSER}" \
+    --image-uri "${IMAGE_URI}" --query LastUpdateStatus --output text >/dev/null
+  aws lambda wait function-updated-v2 --function-name "${PARSER}"
+fi
+
 # --- report -----------------------------------------------------------------
 
 # The custom domain (api.<domain>) once step 6 has set it up, else the function URL.

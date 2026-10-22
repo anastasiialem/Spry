@@ -109,6 +109,15 @@ export VITE_COGNITO_AUTHORITY="${COGNITO_AUTHORITY}"
 export VITE_COGNITO_CLIENT_ID="${COGNITO_CLIENT_ID}"
 export VITE_COGNITO_DOMAIN="${COGNITO_DOMAIN}"
 
+# "Paste an agenda" calls the parser's own function URL. No ai stack: the
+# screen hides the paste box and only typing remains.
+PARSER_URL="$(aws cloudformation describe-stacks --stack-name "${PROJECT_NAME}-ai" \
+  --query "Stacks[0].Outputs[?OutputKey=='ParserUrl'].OutputValue" --output text 2>/dev/null || true)"
+[[ "${PARSER_URL}" == "None" ]] && PARSER_URL=""
+[[ -n "${PARSER_URL}" ]] && log "agenda parser at ${PARSER_URL}" \
+  || warn "no ${PROJECT_NAME}-ai stack - building without Paste an agenda (make deploy-ai)"
+export VITE_PARSER_URL="${PARSER_URL%/}"
+
 # --- build ------------------------------------------------------------------
 
 log "building against ${API_URL}"
@@ -135,6 +144,7 @@ else
     -e VITE_COGNITO_AUTHORITY \
     -e VITE_COGNITO_CLIENT_ID \
     -e VITE_COGNITO_DOMAIN \
+    -e VITE_PARSER_URL \
     node:22-alpine \
     sh -c "corepack enable && pnpm install --frozen-lockfile && pnpm build"
 fi

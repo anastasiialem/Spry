@@ -121,3 +121,28 @@ async def test_patch_invalid_is_422(client: AsyncClient, body: dict) -> None:
     meeting_id = (await client.post("/api/meetings", json=VALID)).json()["id"]
     response = await client.patch(f"/api/meetings/{meeting_id}", json=body)
     assert response.status_code == 422
+
+
+async def test_delete_takes_agenda_and_files_with_it(client: AsyncClient) -> None:
+    meeting_id = (await client.post("/api/meetings", json=VALID)).json()["id"]
+    agenda = {"items": [{"topic": "Roadmap"}], "action_items": []}
+    assert (await client.put(f"/api/meetings/{meeting_id}/agenda", json=agenda)).status_code == 200
+    upload = await client.post(
+        f"/api/meetings/{meeting_id}/attachments",
+        params={"filename": "notes.pdf"},
+        content=b"%PDF-1.7",
+        headers={"Content-Type": "application/pdf"},
+    )
+    attachment_id = upload.json()["id"]
+
+    response = await client.delete(f"/api/meetings/{meeting_id}")
+    assert response.status_code == 204
+    assert (await client.get("/api/meetings")).json() == []
+    assert (await client.get(f"/api/meetings/{meeting_id}/agenda")).status_code == 404
+    assert (await client.get(f"/api/attachments/{attachment_id}")).status_code == 404
+
+
+async def test_delete_missing_is_404(client: AsyncClient) -> None:
+    response = await client.delete("/api/meetings/999999")
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Meeting not found"}

@@ -12,7 +12,7 @@ Why one repository and not three: see [`docs/decisions/0001-monorepo.md`](docs/d
 ## 1. Scope of the first slice
 
 - The backend exposes `GET /api/meetings` (list), `POST /api/meetings` (create one),
-  `PATCH /api/meetings/{id}` (edit any field) and file attachments per meeting (upload, list,
+  `PATCH /api/meetings/{id}` (edit any field), `DELETE /api/meetings/{id}` and file attachments per meeting (upload, list,
   download, delete).
 - A meeting has: `id`, `title`, `starts_at`, `ends_at`, `attendee_count`, `status`, and
   zero or more attachments (≤ 4 MB each).
@@ -180,6 +180,11 @@ value; `null` is not allowed; unknown fields → `422`. After merging, the same 
 apply (`ends_at > starts_at`, etc.) → otherwise `422`.
 `200` with the updated `Meeting`; unknown `id` → `404 {"detail": "Meeting not found"}`.
 
+### `DELETE /api/meetings/{id}`
+Deletes the meeting with its agenda and attachments (`ON DELETE CASCADE`). `204`; unknown `id`
+(or another user's) → `404 {"detail": "Meeting not found"}`. The meeting panel's 🗑 button asks
+for confirmation first.
+
 ### Attachments
 Files are uploaded as the **raw request body** (not multipart) — the browser sends the `File`
 object directly, and the server needs no form-parsing dependency.
@@ -230,6 +235,31 @@ Why files live in Postgres and not S3: [`docs/decisions/0002-attachments-in-post
 
 Datetimes without a timezone are rejected (`422`); the client always sends UTC.
 
+### Agenda
+One agenda per meeting; saving replaces it. Same ownership rule: someone else's meeting → `404`.
+
+| Method | Path | Body | Success | Errors |
+|---|---|---|---|---|
+| `GET` | `/api/meetings/{id}/agenda` | — | `200` `Agenda` | `404` meeting or no agenda yet |
+| `PUT` | `/api/meetings/{id}/agenda` | `AgendaWrite` | `200` `Agenda` | `404` meeting, `422` invalid |
+
+```jsonc
+// AgendaWrite (request)
+{
+  "items": [{"topic": "New Pro tiers", "owner": "Olena", "minutes": 15}],   // 0..50; topic 1..500, owner ≤200 or null, minutes 1..480 or null
+  "action_items": [{"task": "Competitor comparison", "owner": "Taras", "due": "2026-10-23"}],  // 0..50
+  "ai_suggestion": {                    // optional: the parser's answer the form started from
+    "agenda": { /* ParsedAgenda, exactly as the parser returned it */ },
+    "model": "mistral.mistral-large-3-675b-instruct",
+    "prompt_version": "agenda-v1"
+  }
+}
+// Agenda (response)
+{ "meeting_id": 1, "items": [...], "action_items": [...],
+  "ai_model": "mistral.mistral-large-3-675b-instruct" | null, "ai_prompt_version": "agenda-v1" | null,
+  "updated_at": "2026-10-18T12:00:00Z" }
+```
+
 ### Database table `meetings`
 
 | Column | Type | Constraint |
@@ -254,8 +284,19 @@ Datetimes without a timezone are rejected (`422`); the client always sends UTC.
 | `data` | `bytea` | not null; loaded only when the file is downloaded |
 | `created_at` | `timestamptz` | not null, default `now()` |
 
+### Database table `agendas`
+
+| Column | Type | Constraint |
+|---|---|---|
+| `meeting_id` | `integer` | primary key, FK → `meetings.id` `ON DELETE CASCADE` |
+| `items` | `jsonb` | not null — `[{topic, owner, minutes}]` |
+| `action_items` | `jsonb` | not null, default `[]` — `[{task, owner, due}]` |
+| `ai_suggestion` | `jsonb` | null — the parser's `ParsedAgenda` before the user's corrections |
+| `ai_model` / `ai_prompt_version` | `varchar(100)` / `varchar(40)` | null — who suggested it |
+| `updated_at` | `timestamptz` | not null, default `now()` |
+
 Created by Alembic revisions `0001_create_meetings`, `0002_meeting_status` (adds `status`;
-existing rows become `not_started`) and `0003_attachments`. `Base.metadata.create_all()` is used only
+existing rows become `not_started`), `0003_attachments`, `0004_meeting_owner` and `0005_agendas`. `Base.metadata.create_all()` is used only
 in tests.
 
 ---
@@ -453,3 +494,48 @@ make report-now ───────┴─> SQS report-requests ──(3 receiv
   it reach the DLQ. Unset both afterwards.
 - **Commands** — `make report-now`, `make report-ls`, `make report-logs`, `make report-dlq`.
 
+## 11. Paste an agenda (an LLM on Amazon Bedrock)
+
+The user pastes an email, a chat message or notes into a meeting; a model on Bedrock turns it into a
+structured agenda; the app shows the normal agenda form pre-filled; the user checks it and
+saves. The model suggests, the person decides. Why it is built this way:
+[`docs/decisions/0004-llm-agenda-parsing.md`](docs/decisions/0004-llm-agenda-parsing.md);
+diagram: [`docs/architecture.md`](docs/architecture.md).
+
+```
+browser ──POST {text, today, tz} + access token──> agenda-parser Lambda (function URL, no VPC)
+                                                      │ token? ≤10,000 chars? → Bedrock (Converse)
+                                                      │ record_agenda tool → validate ParsedAgenda (1 retry)
+        <── {agenda, model, prompt_version} ──────────┘ one JSON log line: tokens, latency, cost
+browser ──PUT /api/meetings/{id}/agenda (+ ai_suggestion)──> API (VPC) ──> RDS
+```
+
+- **Parser** — `app/ai/agenda.py`, `parse_agenda(text, today, tz)`; no Lambda or database in it.
+  Model from `PARSER_MODEL` (default `mistral.mistral-large-3-675b-instruct`; Claude is not
+  available on this account, ADR 0004), Bedrock's Converse API through `boto3`
+  (`bedrock-runtime`, 10 s read timeout, 2 retries), `temperature: 0`. Any Bedrock model with
+  tool use works unchanged. The model must answer with the `record_agenda` tool (no forced tool
+  choice, which Opus 5.5 rejects, so the prompt asks for it). Invalid output is sent back once with the validation error; no tool call, or no items and
+  no action items, is "no agenda found". `PROMPT_VERSION = "agenda-v1"`.
+- **Lambda** — `app/ai/agenda_lambda.py`, the backend image with `ImageConfig.Command`, 512 MB,
+  30 s, outside the VPC (`infra/ai.yml`, stack `spry-ai`, `make deploy-ai`). Role:
+  `bedrock:InvokeModel` on this region's foundation models. Verifies the Cognito access token with the pool's
+  JWKS (fetched: it has internet). Answers `200`, `400` bad body, `401` token, `413` > 10,000
+  chars, `422` no agenda, `429` Bedrock throttling, `503` Bedrock unavailable. CORS (POST,
+  `authorization`, `content-type`) is on the function URL, for `API_CORS_ORIGINS` +
+  `http://localhost:5173`. Log line: `{"event": "agenda_parsed", "user", "model",
+  "prompt_version", "input_tokens", "output_tokens", "latency_ms", "cost_usd", ...}`; the
+  pasted text is not logged. `make deploy-backend` rolls it to each new image.
+- **Screen** — the meeting panel's **Agenda** section: **Paste an agenda** (text area, character
+  count, Parse; while waiting a seconds counter and **Cancel**, via `AbortController`) or
+  **Add agenda / Edit** by hand. The result is the agenda form with every model-filled field
+  marked *suggested* until touched; empty stays empty. Suggested meeting title/time are shown
+  with an opt-in "Also update the meeting" checkbox (PATCH through the normal API). Save is
+  always `PUT /api/meetings/{id}/agenda`, carrying the untouched suggestion. Each error has its
+  own message and "Type it instead". `VITE_PARSER_URL` (from the `spry-ai` stack, build time);
+  empty hides the paste box.
+- **Budget** — AWS Budgets `spry-monthly`, $5, net of credits, emails `BUDGET_EMAIL` (default:
+  the first `REPORT_RECIPIENTS`) on actual > 100 % and forecast > 100 %.
+- **Commands** — `make llm-hello` (first call from the laptop), `make parse TEXT="..."` (one
+  parse: JSON, usage, cost; `PARSER_MODEL=... make parse` to compare), `make deploy-ai`,
+  `make ai-logs`. Laptop commands run in the backend container with `~/.aws` mounted read-only.

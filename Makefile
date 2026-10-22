@@ -3,7 +3,8 @@ COMPOSE := docker compose
 .PHONY: help lock up down clean logs ps test lint fmt migrate revision shell-db \
 	deploy-backend destroy-backend logs-backend migrate-backend \
 	domain-cert domain-dns deploy-frontend destroy-frontend github-role \
-	report-local deploy-reports report-now report-ls report-logs report-dlq
+	report-local deploy-reports report-now report-ls report-logs report-dlq \
+	llm-hello parse deploy-ai ai-logs
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
@@ -106,3 +107,21 @@ report-logs: ## The trigger lines of both report functions, last hour
 
 report-dlq: ## Messages waiting in the dead-letter queue
 	./scripts/reports.sh dlq
+
+# --- paste an agenda (lab: LLM on Bedrock) ---
+
+# Runs in the backend container with your own AWS credentials (~/.aws, read-only).
+AWS_RUN := $(COMPOSE) run --rm --no-deps -v $(HOME)/.aws:/root/.aws:ro \
+	-e AWS_PROFILE -e AWS_REGION -e PARSER_MODEL backend
+
+llm-hello: ## First call to the parser's model on Bedrock from the laptop: answer, stop_reason, usage
+	$(AWS_RUN) python -m app.ai.hello
+
+parse: ## Parse one agenda from the laptop: make parse TEXT="Пн 10:00, синк ..." (PARSER_MODEL=... to compare)
+	$(AWS_RUN) python -m app.ai.agenda "$(TEXT)"
+
+deploy-ai: ## Agenda-parser Lambda + function URL + budget alarm (infra/ai.yml, after deploy-backend)
+	./scripts/deploy-ai.sh
+
+ai-logs: ## The parser's log lines (one JSON line per parse), last hour
+	aws logs tail /aws/lambda/$${PROJECT_NAME:-spry}-agenda-parser --since 1h --format short

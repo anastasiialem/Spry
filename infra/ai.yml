@@ -1,0 +1,202 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: >-
+  Spry "Paste an agenda". The agenda-parser Lambda - the backend's image with
+  another command - sits behind its own public function URL, outside the VPC:
+  it receives pasted text, asks a model on Amazon Bedrock (Mistral Large 3) for a structured
+  agenda, validates it and returns JSON. It never touches the database; the
+  user checks the pre-filled form and saves it through the normal API. Also a
+  monthly AWS Budgets alarm, because every parse costs money.
+  Deployed by scripts/deploy-ai.sh (make deploy-ai).
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: spry
+
+  ImageUri:
+    Type: String
+    Description: The backend image (read from the running API by the deploy script).
+
+  Architecture:
+    Type: String
+    Default: arm64
+    AllowedValues: [arm64, x86_64]
+
+  ParserModel:
+    Type: String
+    Default: mistral.mistral-large-3-675b-instruct
+    Description: Bedrock model id with tool use (Converse API). mistral.ministral-3-14b-instruct is cheaper but worse - see docs/agenda-parser-answers.md.
+
+  CognitoUserPoolId:
+    Type: String
+    Description: The handler accepts only this pool's access tokens.
+
+  CognitoClientId:
+    Type: String
+
+  AllowedOrigins:
+    Type: CommaDelimitedList
+    Description: The site's origins, for the function URL's CORS.
+
+  BudgetEmail:
+    Type: String
+    Default: ""
+    Description: Who gets the budget alarm. Empty - no budget.
+
+  BudgetLimitUsd:
+    Type: Number
+    Default: 5
+
+  LogRetentionDays:
+    Type: Number
+    Default: 14
+
+Conditions:
+  MakeBudget: !Not [!Equals [!Ref BudgetEmail, ""]]
+
+Resources:
+  ParserRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        # No API key anywhere: this permission is what lets the function call
+        # the model (Converse is authorised as InvokeModel). Any foundation model
+        # in this region, so PARSER_MODEL can change without a policy change.
+        - PolicyName: call-bedrock-model
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: bedrock:InvokeModel
+                Resource: !Sub "arn:aws:bedrock:${AWS::Region}::foundation-model/*"
+      Tags:
+        - Key: PROJECT_NAME
+          Value: !Ref ProjectName
+
+  ParserLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${ProjectName}-agenda-parser"
+      RetentionInDays: !Ref LogRetentionDays
+      Tags:
+        - Key: PROJECT_NAME
+          Value: !Ref ProjectName
+
+  AgendaParser:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "${ProjectName}-agenda-parser"
+      Description: Pasted text -> Bedrock model -> validated agenda JSON (outside the VPC)
+      PackageType: Image
+      Code:
+        ImageUri: !Ref ImageUri
+      ImageConfig:
+        Command: ["app.ai.agenda_lambda.handler"]
+      Architectures: [!Ref Architecture]
+      MemorySize: 512
+      # Up to two model calls (one retry with the validation error), 10 s each.
+      Timeout: 30
+      Role: !GetAtt ParserRole.Arn
+      LoggingConfig:
+        LogGroup: !Ref ParserLogGroup
+      # No VpcConfig: no database here, and outside the VPC it reaches Bedrock
+      # and Cognito's public keys with no NAT and no interface endpoint.
+      Environment:
+        Variables:
+          APP_ENV: production
+          PARSER_MODEL: !Ref ParserModel
+          BEDROCK_REGION: !Ref AWS::Region
+          COGNITO_REGION: !Ref AWS::Region
+          COGNITO_USER_POOL_ID: !Ref CognitoUserPoolId
+          COGNITO_CLIENT_ID: !Ref CognitoClientId
+      Tags:
+        - Key: PROJECT_NAME
+          Value: !Ref ProjectName
+
+  # Public, but the handler rejects anything without a valid Cognito token
+  # (401) and any text over 10,000 characters (413) before calling the model.
+  # CORS lives here, so the OPTIONS preflight never reaches the code.
+  ParserUrl:
+    Type: AWS::Lambda::Url
+    Properties:
+      TargetFunctionArn: !Ref AgendaParser
+      AuthType: NONE
+      Cors:
+        AllowOrigins: !Ref AllowedOrigins
+        AllowMethods: [POST]
+        AllowHeaders: [authorization, content-type]
+        MaxAge: 3600
+
+  # A public function URL needs both grants, as for the API.
+  ParserUrlPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref AgendaParser
+      Action: lambda:InvokeFunctionUrl
+      Principal: "*"
+      FunctionUrlAuthType: NONE
+
+  ParserUrlInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref AgendaParser
+      Action: lambda:InvokeFunction
+      Principal: "*"
+      InvokedViaFunctionUrl: true
+
+  # The whole account's bill, not only Bedrock: an email when the month passes
+  # the limit, and one earlier when the forecast does. Net of credits - the RDS
+  # instance alone is ~$14 a month gross (docs/decisions/0003), paid from the
+  # sign-up credits, so a gross budget would alarm on day one. This one fires
+  # when real money starts to go out.
+  MonthlyBudget:
+    Type: AWS::Budgets::Budget
+    Condition: MakeBudget
+    Properties:
+      Budget:
+        BudgetName: !Sub "${ProjectName}-monthly"
+        BudgetType: COST
+        TimeUnit: MONTHLY
+        BudgetLimit:
+          Amount: !Ref BudgetLimitUsd
+          Unit: USD
+        CostTypes:
+          IncludeCredit: true
+          IncludeRefund: false
+      NotificationsWithSubscribers:
+        - Notification:
+            NotificationType: ACTUAL
+            ComparisonOperator: GREATER_THAN
+            Threshold: 100
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - SubscriptionType: EMAIL
+              Address: !Ref BudgetEmail
+        - Notification:
+            NotificationType: FORECASTED
+            ComparisonOperator: GREATER_THAN
+            Threshold: 100
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - SubscriptionType: EMAIL
+              Address: !Ref BudgetEmail
+
+Outputs:
+  ParserUrl:
+    Description: What the frontend calls for "Paste an agenda" (VITE_PARSER_URL).
+    Value: !GetAtt ParserUrl.FunctionUrl
+  ParserFunction:
+    Value: !Ref AgendaParser
+  ParserModel:
+    Value: !Ref ParserModel

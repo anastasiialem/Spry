@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Download, FileText, Paperclip, Trash2, Upload, X } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 
+import { AgendaSection } from "@/components/agenda-section";
 import { MeetingFields } from "@/components/meeting-fields";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -188,6 +189,28 @@ export function MeetingPeek({
     onError: (error) => setErrors({ form: error.message }),
   });
 
+  const remove = useMutation({
+    mutationFn: () => api.deleteMeeting(meeting.id),
+    onSuccess: async () => {
+      queryClient.removeQueries({ queryKey: ["meetings", meeting.id] });
+      await queryClient.invalidateQueries({
+        queryKey: ["meetings"],
+        exact: true,
+      });
+      onClose();
+    },
+    onError: (error) => setErrors({ form: error.message }),
+  });
+
+  function onDelete() {
+    if (
+      window.confirm(
+        `Delete "${meeting.title}"? Its agenda and files are deleted too.`,
+      )
+    )
+      remove.mutate();
+  }
+
   function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setSaved(false);
@@ -216,15 +239,27 @@ export function MeetingPeek({
       >
         <div className="sticky top-0 z-10 flex items-center justify-between border-b bg-background/90 px-6 py-2 backdrop-blur">
           <span className="text-xs text-muted-foreground">Meeting</span>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="size-8"
-            aria-label="Close"
-            onClick={onClose}
-          >
-            <X />
-          </Button>
+          <div className="flex gap-1">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-8 text-muted-foreground hover:text-destructive"
+              aria-label={`Delete ${meeting.title}`}
+              disabled={remove.isPending}
+              onClick={onDelete}
+            >
+              <Trash2 />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-8"
+              aria-label="Close"
+              onClick={onClose}
+            >
+              <X />
+            </Button>
+          </div>
         </div>
 
         <div className="grid gap-8 px-6 py-6 sm:px-10">
@@ -256,6 +291,8 @@ export function MeetingPeek({
               </Button>
             </div>
           </form>
+
+          <AgendaSection key={meeting.id} meeting={meeting} />
 
           <Files meetingId={meeting.id} />
         </div>

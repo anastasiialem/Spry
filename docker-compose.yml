@@ -57,6 +57,8 @@ services:
       VITE_COGNITO_AUTHORITY: ${COGNITO_AUTHORITY:-}
       VITE_COGNITO_CLIENT_ID: ${COGNITO_CLIENT_ID:-}
       VITE_COGNITO_DOMAIN: ${COGNITO_DOMAIN:-}
+      # Written to .env by make deploy-ai; empty hides "Paste an agenda".
+      VITE_PARSER_URL: ${PARSER_URL:-}
     ports:
       - "${FRONTEND_PORT:-5173}:5173"
     volumes:
