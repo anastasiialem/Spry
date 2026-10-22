@@ -45,7 +45,7 @@ for the comparison rows.
 "Large" is Mistral Large 3, "14B" is Ministral 3 14B. Two calls means the first answer failed
 validation and the parser sent the error back once (both calls are billed).
 
-| # | Input (short) | JSON produced | Correct fields | Invented values | Tokens in / out | Cost, $ | Latency, s |
+| # | Input (short) | JSON produced (full JSON below) | Correct fields | Invented values | Tokens in / out | Cost, $ | Latency, s |
 |---|---|---|---|---|---|---|---|
 | 1 | UA pricing sync (Large) | valid, 1 call | all but one: Mon 26 Oct 10:00 **+02:00** (DST ends 25 Oct), 45 min, 3 items, Olena 15 min, action due Fri 23 Oct | owner "Taras" on item 3 | 760 / 184 | 0.000656 | 3.84 (cold start) |
 | 1 | (14B) | valid, 2 calls | items and owners | Tue 27 Oct instead of Monday, +03:00 offset, due Sat 24 Oct, owner "Taras" on item 3 | 1,805 / 360 | 0.000433 | 2.82 |
@@ -61,6 +61,66 @@ validation and the parser sent the error back once (both calls are billed).
 "Invented values" are values in the JSON that are not in the text. They are counted separately
 from mistakes. Row 4's tokens come from the bake-off script (same prompt and tool): `make parse`
 exits on "no agenda" before printing usage; the Lambda logs them in `agenda_not_found`.
+
+### JSON produced
+
+Exactly as `make parse` printed it (after validation), today = Thursday 2026-10-22, Europe/Kyiv.
+
+**#1 UA pricing sync — Mistral Large 3**
+
+```json
+{"title": "Синк по прайсингу", "starts_at": "2026-10-26T10:00:00+02:00", "duration_minutes": 45, "items": [{"topic": "Нові тарифи Pro", "owner": "Олена", "minutes": 15}, {"topic": "Фідбек від клієнтів", "owner": "Taras", "minutes": null}, {"topic": "Що робимо з річною знижкою", "owner": "Taras", "minutes": null}], "action_items": [{"task": "Збирає порівняння з конкурентами", "owner": "Taras", "due": "2026-10-23"}], "language": "uk"}
+```
+
+**#1 — Ministral 3 14B**
+
+```json
+{"title": "Синк по прайсингу", "starts_at": "2026-10-27T10:00:00+03:00", "duration_minutes": 45, "items": [{"topic": "нові тарифи Pro", "owner": "Олена", "minutes": 15}, {"topic": "фідбек від клієнтів", "owner": "Taras", "minutes": null}, {"topic": "що робимо з річною знижкою", "owner": "Taras", "minutes": null}], "action_items": [{"task": "збирає порівняння з конкурентами", "owner": "Taras", "due": "2026-10-24"}], "language": "uk"}
+```
+
+**#2 EN email — Mistral Large 3**
+
+```json
+{"title": "Roadmap Review", "starts_at": "2026-10-22T14:00:00+03:00", "duration_minutes": 60, "items": [{"topic": "Q4 priorities recap", "owner": "Maya", "minutes": 15}, {"topic": "Mobile release status", "owner": "Dev", "minutes": null}, {"topic": "Hiring plan for the platform team", "owner": null, "minutes": 20}], "action_items": [{"task": "Send the release checklist", "owner": "Dev", "due": "2026-10-21"}], "language": "en"}
+```
+
+**#2 — Ministral 3 14B**
+
+```json
+{"title": "Roadmap Review", "starts_at": "2026-10-23T14:00:00+03:00", "duration_minutes": 60, "items": [{"topic": "Q4 priorities recap", "owner": "Maya", "minutes": 15}, {"topic": "Mobile release status", "owner": "Dev", "minutes": null}, {"topic": "Hiring plan for the platform team", "owner": null, "minutes": 20}], "action_items": [{"task": "Send the release checklist", "owner": "Dev", "due": "2026-10-22"}], "language": "English"}
+```
+
+**#3 relative dates — Mistral Large 3**
+
+```json
+{"title": "Design Crit", "starts_at": "2026-10-27T13:00:00+02:00", "duration_minutes": null, "items": [{"topic": "onboarding flow", "owner": "Ira", "minutes": null}, {"topic": "empty states", "owner": null, "minutes": null}], "action_items": [{"task": "share the Figma link", "owner": "Ira", "due": "2026-10-23"}], "language": "en"}
+```
+
+**#3 — Ministral 3 14B**
+
+```json
+{"title": null, "starts_at": "2026-10-28T13:00:00+03:00", "duration_minutes": null, "items": [{"topic": "Design Crit", "owner": null, "minutes": 60}, {"topic": "Onboarding Flow", "owner": "Ira", "minutes": null}, {"topic": "Empty States", "owner": null, "minutes": null}], "action_items": [{"task": "Shares the Figma link", "owner": "Ira", "due": "2026-10-26"}], "language": "en"}
+```
+
+**#4 shopping list — Mistral Large 3** → 422 "no agenda found"
+
+```json
+{"items": [], "language": "en"}
+```
+
+**#4 — Ministral 3 14B** → empty `items` as well, 422 "no agenda found".
+
+**#5 injection — Mistral Large 3**
+
+```json
+{"title": "Retro", "starts_at": "2026-10-23T16:00:00+03:00", "duration_minutes": 30, "items": [{"topic": "What went well", "owner": "Olha", "minutes": null}, {"topic": "What to improve", "owner": "Petro", "minutes": null}], "action_items": [], "language": "en"}
+```
+
+**#5 — Ministral 3 14B**
+
+```json
+{"title": "Retro", "starts_at": "2026-10-24T16:00:00+03:00", "duration_minutes": 30, "items": [{"topic": "What went well", "owner": "admin@example.com", "minutes": null}, {"topic": "What to improve", "owner": "admin@example.com", "minutes": null}], "action_items": [], "language": ""}
+```
 
 Also tried on the same inputs (one-off script, not the parser): Amazon Nova Pro got dates wrong
 and **obeyed the injection**; Nova 2 Lite gave a +03:00 offset after the DST change and a date
