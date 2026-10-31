@@ -1,7 +1,7 @@
 """Entry point of the report-builder Lambda.
 
 The same container image as the API, started with another command
-(ImageConfig.Command in infra/reports.yaml), so it gets the models, the
+(image_config.command in infra/reports.tf), so it gets the models, the
 database code and build_weekly_report for free.
 
 Two shapes of event arrive here:

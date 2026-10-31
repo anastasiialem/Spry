@@ -17,7 +17,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.config import Settings, get_settings
 
-# Without a user pool (docker compose before `make deploy-auth`, and the tests)
+# Without a user pool (docker compose before the infrastructure exists, and the tests)
 # everything belongs to this one local user. Production refuses instead.
 DEV_USER = "local-dev"
 JWKS_TTL_SECONDS = 3600

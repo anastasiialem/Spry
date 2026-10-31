@@ -1,0 +1,16 @@
+# What a CLI-started HCP Terraform run (make infra-plan) must not upload. The
+# workspace's working directory is infra/, so Terraform uploads the repository
+# root. Runs started by a push only see what is in Git.
+.git/
+.env
+.env.*
+!.env.example
+**/node_modules/
+**/.venv/
+**/__pycache__/
+.pnpm-store/
+frontend/dist/
+infra/.terraform/
+infra/.build/
+*.tfstate
+*.tfstate.*

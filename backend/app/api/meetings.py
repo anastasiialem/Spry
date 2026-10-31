@@ -2,13 +2,21 @@
 
 from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Query, Request, status
+from fastapi import APIRouter, HTTPException, Query, Request, Response, status
 
 from app.auth import CurrentUser
 from app.db import SessionDep
 from app.models import Meeting
 from app.models.attachment import MAX_ATTACHMENT_BYTES
-from app.schemas import AttachmentRead, MeetingCreate, MeetingRead, MeetingUpdate
+from app.schemas import (
+    AgendaRead,
+    AgendaWrite,
+    AttachmentRead,
+    MeetingCreate,
+    MeetingRead,
+    MeetingUpdate,
+)
+from app.services import agendas as agendas_service
 from app.services import attachments as attachments_service
 from app.services import meetings as meetings_service
 
@@ -58,6 +66,39 @@ async def update_meeting(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     count = await meetings_service.count_attachments(session, meeting.id)
     return _read(meeting, count)
+
+
+@router.delete(
+    "/{meeting_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete a meeting, with its agenda and files",
+)
+async def delete_meeting(meeting_id: int, session: SessionDep, user: CurrentUser) -> Response:
+    meeting = await _get_or_404(session, user, meeting_id)
+    await meetings_service.delete_meeting(session, meeting)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/{meeting_id}/agenda", response_model=AgendaRead, summary="A meeting's agenda")
+async def get_agenda(meeting_id: int, session: SessionDep, user: CurrentUser) -> AgendaRead:
+    await _get_or_404(session, user, meeting_id)
+    agenda = await agendas_service.get_agenda(session, meeting_id)
+    if agenda is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No agenda yet")
+    return AgendaRead.model_validate(agenda)
+
+
+@router.put(
+    "/{meeting_id}/agenda",
+    response_model=AgendaRead,
+    summary="Save (replace) a meeting's agenda, with the parser's suggestion if there was one",
+)
+async def save_agenda(
+    meeting_id: int, payload: AgendaWrite, session: SessionDep, user: CurrentUser
+) -> AgendaRead:
+    await _get_or_404(session, user, meeting_id)
+    agenda = await agendas_service.save_agenda(session, meeting_id, payload)
+    return AgendaRead.model_validate(agenda)
 
 
 @router.get(

@@ -42,6 +42,12 @@ class Settings(BaseSettings):
     # go to the dead-letter queue after three attempts. Empty in normal use.
     report_fail_week: str = ""
 
+    # Agenda parser (app/ai). Any Bedrock model with tool use, through the
+    # Converse API; the Lambda's role is what allows the call, so there is no key
+    # to configure. Mistral, not Claude: see ADR 0004.
+    parser_model: str = "mistral.mistral-large-3-675b-instruct"
+    bedrock_region: str = "us-east-1"
+
     @property
     def cognito_issuer(self) -> str:
         host = f"https://cognito-idp.{self.cognito_region}.amazonaws.com"

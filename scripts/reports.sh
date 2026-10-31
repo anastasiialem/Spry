@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Day-to-day commands for the weekly report (see infra/reports.yaml).
+# Day-to-day commands for the weekly report (see infra/reports.tf).
 #
 #   now [WEEK]   send a "build the report" command to the queue (no week: last week)
 #   ls           list the reports in the bucket
@@ -17,13 +17,9 @@ for var in AWS_PROFILE AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
   [[ -n "${!var:-}" ]] || unset "${var}"
 done
 PROJECT_NAME="${PROJECT_NAME:-spry}"
-STACK_NAME="${REPORTS_STACK_NAME:-${PROJECT_NAME}-reports}"
 export AWS_DEFAULT_REGION="${AWS_REGION:-${AWS_DEFAULT_REGION:-us-east-1}}"
 
-out() {
-  aws cloudformation describe-stacks --stack-name "${STACK_NAME}" \
-    --query "Stacks[0].Outputs[?OutputKey=='$1'].OutputValue" --output text
-}
+out() { terraform -chdir="${ROOT}/infra" output -raw "$1"; }
 
 case "${1:-}" in
   now)
@@ -34,14 +30,14 @@ case "${1:-}" in
     else
       BODY='{"week": null, "source": "manual"}'
     fi
-    aws sqs send-message --queue-url "$(out QueueUrl)" --message-body "${BODY}" \
+    aws sqs send-message --queue-url "$(out report_queue_url)" --message-body "${BODY}" \
       --query MessageId --output text >/dev/null
     echo "sent ${BODY}"
     echo "within a minute: make report-ls, make report-logs, and your inbox"
     ;;
   ls)
     # `aws s3 ls` exits 1 when nothing matches - not an error here.
-    aws s3 ls "s3://$(out BucketName)/reports/" --recursive || echo "(no reports yet)"
+    aws s3 ls "s3://$(out reports_bucket)/reports/" --recursive || echo "(no reports yet)"
     ;;
   logs)
     for fn in report-builder report-mailer; do
@@ -51,7 +47,7 @@ case "${1:-}" in
     done
     ;;
   dlq)
-    aws sqs get-queue-attributes --queue-url "$(out DlqUrl)" \
+    aws sqs get-queue-attributes --queue-url "$(out report_dlq_url)" \
       --attribute-names ApproximateNumberOfMessages --query Attributes --output table
     ;;
   *)

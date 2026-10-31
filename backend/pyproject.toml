@@ -13,6 +13,8 @@ dependencies = [
     "pydantic-settings>=2.7",
     "mangum>=0.22.0",
     "pyjwt[crypto]>=2.10",
+    # Amazon Bedrock's Converse API (the agenda parser); also in the Lambda base image.
+    "boto3>=1.40",
     # Time zone data for zoneinfo: the Lambda base image has none.
     "tzdata>=2025.2",
 ]

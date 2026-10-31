@@ -90,17 +90,18 @@ BUCKET="$(outputs BucketName)"
 DISTRIBUTION_ID="$(outputs DistributionId)"
 SITE_URL="$(outputs SiteUrl)"
 
-# --- sign-in settings, straight from the auth stack (never copy-pasted) ----
+# --- sign-in settings, straight from Terraform's outputs (never copy-pasted) --
 
-auth_output() {
-  aws cloudformation describe-stacks --stack-name "${PROJECT_NAME}-auth" \
-    --query "Stacks[0].Outputs[?OutputKey=='$1'].OutputValue" --output text 2>/dev/null || true
-}
-COGNITO_AUTHORITY="$(auth_output Authority)"
-COGNITO_CLIENT_ID="$(auth_output ClientId)"
-COGNITO_DOMAIN="$(auth_output Domain)"
-if [[ -z "${COGNITO_CLIENT_ID}" || "${COGNITO_CLIENT_ID}" == "None" ]]; then
-  warn "no ${PROJECT_NAME}-auth stack - building without sign-in (make deploy-auth)"
+# infra/ is applied by HCP Terraform; its outputs are read with the workspace's
+# API token (terraform login on a laptop, TF_API_TOKEN in CI).
+tf_out() { terraform -chdir="${ROOT}/infra" output -raw "$1" 2>/dev/null || true; }
+COGNITO_AUTHORITY="$(tf_out authority)"
+COGNITO_CLIENT_ID="$(tf_out client_id)"
+COGNITO_DOMAIN="$(tf_out domain)"
+if [[ -z "${COGNITO_CLIENT_ID}" ]]; then
+  # In CI a bundle without sign-in would be shipped to everyone: stop instead.
+  [[ -n "${CI:-}" ]] && die "no terraform outputs in CI - is TF_API_TOKEN set and infra-init run?"
+  warn "no terraform outputs - building without sign-in (terraform login, make infra-init)"
   COGNITO_AUTHORITY=""; COGNITO_CLIENT_ID=""; COGNITO_DOMAIN=""
 else
   log "sign-in via ${COGNITO_DOMAIN} (client ${COGNITO_CLIENT_ID})"
@@ -108,6 +109,13 @@ fi
 export VITE_COGNITO_AUTHORITY="${COGNITO_AUTHORITY}"
 export VITE_COGNITO_CLIENT_ID="${COGNITO_CLIENT_ID}"
 export VITE_COGNITO_DOMAIN="${COGNITO_DOMAIN}"
+
+# "Paste an agenda" calls the parser's own function URL. No output: the screen
+# hides the paste box and only typing remains.
+PARSER_URL="$(tf_out parser_url)"
+[[ -n "${PARSER_URL}" ]] && log "agenda parser at ${PARSER_URL}" \
+  || warn "no parser_url output - building without Paste an agenda"
+export VITE_PARSER_URL="${PARSER_URL%/}"
 
 # --- build ------------------------------------------------------------------
 
@@ -135,6 +143,7 @@ else
     -e VITE_COGNITO_AUTHORITY \
     -e VITE_COGNITO_CLIENT_ID \
     -e VITE_COGNITO_DOMAIN \
+    -e VITE_PARSER_URL \
     node:22-alpine \
     sh -c "corepack enable && pnpm install --frozen-lockfile && pnpm build"
 fi

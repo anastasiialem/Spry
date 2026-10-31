@@ -1,0 +1,82 @@
+# terraform plan right after the migration (HCP Terraform run run-fKbAhbd3zQGtSBo2, 2026-10-31)
+
+Terraform v1.17.1
+on linux_amd64
+
+Initializing plugins and modules...
+data.archive_file.report_mailer: Refreshing...
+data.archive_file.link_accounts: Refreshing...
+data.archive_file.report_mailer: Refresh complete after 0s [id=fa999cfb3a859864c3515a83228cca21db243501]
+data.archive_file.link_accounts: Refresh complete after 0s [id=23a952427f88348d35aabd860cc977fd9f9ea75b]
+aws_cloudwatch_log_group.parser: Refreshing state... [id=/aws/lambda/spry-agenda-parser]
+aws_cloudwatch_log_group.mailer: Refreshing state... [id=/aws/lambda/spry-report-mailer]
+aws_iam_role.link_accounts: Refreshing state... [id=spry-auth-LinkAccountsRole-v0ycK2CwmGbN]
+aws_iam_role.parser: Refreshing state... [id=spry-ai-ParserRole-21xOyYCeA0ZN]
+data.aws_cloudformation_stack.backend: Refreshing...
+data.aws_cloudformation_stack.frontend: Refreshing...
+aws_cloudwatch_log_group.builder: Refreshing state... [id=/aws/lambda/spry-report-builder]
+data.aws_caller_identity.current: Refreshing...
+aws_iam_role.builder: Refreshing state... [id=spry-reports-BuilderRole-jCHL6B3VRrPY]
+aws_budgets_budget.monthly[0]: Refreshing state... [id=373665157684:spry-monthly]
+data.aws_caller_identity.current: Refresh complete after 0s [id=373665157684]
+aws_iam_role.mailer: Refreshing state... [id=spry-reports-MailerRole-BLIyyBxFREsp]
+aws_sqs_queue.requests_dlq: Refreshing state... [id=https://sqs.us-east-1.amazonaws.com/373665157684/spry-report-requests-dlq]
+aws_sesv2_email_identity.recipient: Refreshing state... [id=lem.pn@ucu.edu.ua]
+aws_sesv2_email_identity.domain: Refreshing state... [id=spry.pp.ua]
+data.aws_cloudformation_stack.frontend: Refresh complete after 1s [id=arn:aws:cloudformation:us-east-1:373665157684:stack/spry-frontend/e066e910-bd9a-11f1-9d3e-12d7413c28f3]
+data.aws_region.current: Refreshing...
+data.aws_cloudformation_stack.backend: Refresh complete after 1s [id=arn:aws:cloudformation:us-east-1:373665157684:stack/spry-backend/f27aaa80-bd98-11f1-94e0-0e2723484ce7]
+data.aws_region.current: Refresh complete after 0s [id=us-east-1]
+data.aws_partition.current: Refreshing...
+data.aws_partition.current: Refresh complete after 0s [id=aws]
+data.aws_lambda_function.api: Refreshing...
+data.aws_secretsmanager_secret_version.database_url: Refreshing...
+aws_iam_role.scheduler: Refreshing state... [id=spry-reports-SchedulerRole-NxApH0pwq2gZ]
+data.aws_route_tables.main: Refreshing...
+data.aws_security_group.backend_function: Refreshing...
+aws_sqs_queue.requests: Refreshing state... [id=https://sqs.us-east-1.amazonaws.com/373665157684/spry-report-requests]
+data.aws_secretsmanager_secret_version.database_url: Refresh complete after 0s [id=arn:aws:secretsmanager:us-east-1:373665157684:secret:spry/backend/database-url-9NwyhI|AWSCURRENT]
+data.aws_route_tables.subnets: Refreshing...
+aws_s3_bucket.reports: Refreshing state... [id=spry-reports-373665157684]
+aws_iam_role_policy_attachment.parser_basic: Refreshing state... [id=spry-ai-ParserRole-21xOyYCeA0ZN/arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole]
+aws_iam_role_policy.parser: Refreshing state... [id=spry-ai-ParserRole-21xOyYCeA0ZN:call-bedrock-model]
+data.aws_lambda_function.api: Refresh complete after 0s [id=spry-backend]
+aws_iam_role_policy.link_accounts: Refreshing state... [id=spry-auth-LinkAccountsRole-v0ycK2CwmGbN:link-accounts]
+aws_lambda_function.link_accounts: Refreshing state... [id=spry-link-accounts]
+data.aws_route_tables.main: Refresh complete after 0s [id=us-east-1]
+aws_iam_role_policy_attachment.link_accounts_basic: Refreshing state... [id=spry-auth-LinkAccountsRole-v0ycK2CwmGbN/arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole]
+data.aws_route_tables.subnets: Refresh complete after 0s [id=us-east-1]
+aws_iam_role_policy_attachment.builder["service-role/AWSLambdaSQSQueueExecutionRole"]: Refreshing state... [id=spry-reports-BuilderRole-jCHL6B3VRrPY/arn:aws:iam::aws:policy/service-role/AWSLambdaSQSQueueExecutionRole]
+aws_iam_role_policy_attachment.builder["service-role/AWSLambdaVPCAccessExecutionRole"]: Refreshing state... [id=spry-reports-BuilderRole-jCHL6B3VRrPY/arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole]
+aws_lambda_function.report_mailer: Refreshing state... [id=spry-report-mailer]
+aws_iam_role_policy_attachment.mailer_basic: Refreshing state... [id=spry-reports-MailerRole-BLIyyBxFREsp/arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole]
+aws_iam_role_policy.scheduler: Refreshing state... [id=spry-reports-SchedulerRole-NxApH0pwq2gZ:send-report-request]
+aws_scheduler_schedule.weekly: Refreshing state... [id=default/spry-weekly-report]
+data.aws_security_group.backend_function: Refresh complete after 0s [id=sg-08e112b5dd52c8df2]
+aws_vpc_endpoint.s3[0]: Refreshing state... [id=vpce-0aac2c90b9c3a6851]
+aws_cognito_user_pool.main: Refreshing state... [id=us-east-1_OtJVrpEka]
+aws_s3_bucket_ownership_controls.reports: Refreshing state... [id=spry-reports-373665157684]
+aws_s3_bucket_server_side_encryption_configuration.reports: Refreshing state... [id=spry-reports-373665157684]
+aws_iam_role_policy.mailer: Refreshing state... [id=spry-reports-MailerRole-BLIyyBxFREsp:read-and-mail]
+aws_iam_role_policy.builder: Refreshing state... [id=spry-reports-BuilderRole-jCHL6B3VRrPY:write-reports]
+aws_lambda_permission.mailer_from_s3: Refreshing state... [id=spry-reports-MailerInvokePermission-tka4VOxpJQEJ]
+aws_s3_bucket_public_access_block.reports: Refreshing state... [id=spry-reports-373665157684]
+aws_s3_bucket_lifecycle_configuration.reports: Refreshing state... [id=spry-reports-373665157684]
+aws_lambda_function.report_builder: Refreshing state... [id=spry-report-builder]
+aws_s3_bucket_notification.reports: Refreshing state... [id=spry-reports-373665157684]
+aws_cognito_user_pool_domain.main: Refreshing state... [id=spry-anastasiia]
+aws_lambda_event_source_mapping.builder_queue: Refreshing state... [id=741c1089-f13c-4ba5-98be-efdc89a30a2c]
+aws_lambda_permission.link_accounts: Refreshing state... [id=spry-auth-LinkAccountsPermission-46Uqz5Ep5pTr]
+aws_cognito_identity_provider.google: Refreshing state... [id=us-east-1_OtJVrpEka:Google]
+aws_cognito_user_pool_client.web: Refreshing state... [id=3d5k455m09ig0sl1p1qj83o4mj]
+aws_lambda_function.agenda_parser: Refreshing state... [id=spry-agenda-parser]
+aws_cognito_managed_login_branding.web: Refreshing state...
+aws_lambda_permission.parser_url: Refreshing state... [id=spry-ai-ParserUrlPermission-W07UneQzZNvf]
+aws_lambda_permission.parser_url_invoke: Refreshing state... [id=spry-ai-ParserUrlInvokePermission-1JTkex3o7ASI]
+aws_lambda_function_url.parser: Refreshing state... [id=spry-agenda-parser]
+
+No changes. Your infrastructure matches the configuration.
+
+Terraform has compared your real infrastructure against your configuration
+and found no differences, so no changes are needed.
+

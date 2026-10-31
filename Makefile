@@ -3,7 +3,9 @@ COMPOSE := docker compose
 .PHONY: help lock up down clean logs ps test lint fmt migrate revision shell-db \
 	deploy-backend destroy-backend logs-backend migrate-backend \
 	domain-cert domain-dns deploy-frontend destroy-frontend github-role \
-	report-local deploy-reports report-now report-ls report-logs report-dlq
+	infra-init infra-fmt infra-validate infra-plan infra-output infra-env auth-branding \
+	report-local report-now report-ls report-logs report-dlq \
+	llm-hello parse ai-logs
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
@@ -84,16 +86,38 @@ destroy-frontend: ## Delete the bucket and distribution
 github-role: ## IAM role GitHub Actions assumes via OIDC
 	./scripts/github-role.sh
 
-deploy-auth: ## Cognito user pool + Google sign-in (infra/auth.yaml)
-	./scripts/deploy-auth.sh
+# --- infrastructure as code (infra/*.tf, HCP Terraform workspace spry-dev) ---
+# No apply here on purpose: HCP Terraform plans every pull request and applies
+# on merge to main. Plans from a laptop run remotely in the same workspace.
+
+TF := terraform -chdir=infra
+
+infra-init: ## Connect infra/ to the HCP Terraform workspace (after terraform login)
+	$(TF) init -input=false
+
+infra-fmt: ## terraform fmt (run before every commit that touches infra/)
+	$(TF) fmt -recursive
+
+infra-validate: ## fmt check + validate, touches nothing in the cloud
+	$(TF) fmt -check -recursive
+	$(TF) validate
+
+infra-plan: ## Speculative plan in HCP Terraform: what a merge would change
+	$(TF) plan
+
+infra-output: ## All outputs of the applied infrastructure
+	$(TF) output
+
+infra-env: ## Copy public outputs (Cognito, parser URL) to .env; print Google/DKIM settings
+	./scripts/infra-env.sh
+
+auth-branding: ## Sign-in page background image (through the API, on top of Terraform's style)
+	./scripts/auth-branding.sh
 
 # --- weekly report (lab: background work) ---
 
 report-local: ## Build one week's CSV from the Compose database: make report-local WEEK=2026-W40
 	$(COMPOSE) exec backend python -m app.reports.weekly $(WEEK)
-
-deploy-reports: ## Schedule + SQS + builder/mailer Lambdas + bucket + SES (after deploy-backend)
-	./scripts/deploy-reports.sh
 
 report-now: ## Ask for a report now: make report-now WEEK=2026-W40 (no WEEK: last week)
 	./scripts/reports.sh now $(WEEK)
@@ -106,3 +130,18 @@ report-logs: ## The trigger lines of both report functions, last hour
 
 report-dlq: ## Messages waiting in the dead-letter queue
 	./scripts/reports.sh dlq
+
+# --- paste an agenda (lab: LLM on Bedrock) ---
+
+# Runs in the backend container with your own AWS credentials (~/.aws, read-only).
+AWS_RUN := $(COMPOSE) run --rm --no-deps -v $(HOME)/.aws:/root/.aws:ro \
+	-e AWS_PROFILE -e AWS_REGION -e PARSER_MODEL backend
+
+llm-hello: ## First call to the parser's model on Bedrock from the laptop: answer, stop_reason, usage
+	$(AWS_RUN) python -m app.ai.hello
+
+parse: ## Parse one agenda from the laptop: make parse TEXT="Пн 10:00, синк ..." (PARSER_MODEL=... to compare)
+	$(AWS_RUN) python -m app.ai.agenda "$(TEXT)"
+
+ai-logs: ## The parser's log lines (one JSON line per parse), last hour
+	aws logs tail /aws/lambda/$${PROJECT_NAME:-spry}-agenda-parser --since 1h --format short

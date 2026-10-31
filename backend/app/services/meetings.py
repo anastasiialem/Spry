@@ -67,3 +67,9 @@ async def update_meeting(
     await session.flush()
     await session.refresh(meeting)
     return meeting
+
+
+async def delete_meeting(session: AsyncSession, meeting: Meeting) -> None:
+    # The agenda and the files go with it: their foreign keys are ON DELETE CASCADE.
+    await session.delete(meeting)
+    await session.flush()
