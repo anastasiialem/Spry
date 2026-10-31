@@ -50,13 +50,13 @@ spry/                              (repository root)
 │   └── deploy.yml                 # on push to main: lint, then make deploy-backend / deploy-frontend
 │
 ├── infra/                         # CloudFormation templates — the AWS resources, declared
-│   ├── auth.yaml                  # Cognito user pool, Google IdP, public app client, managed login
+│   ├── *.tf                       # Terraform (HCP Terraform workspace spry-dev): auth, reports, ai
 │   ├── backend.yaml               # ECR image → Lambda + function URL, RDS PostgreSQL 17, VPC wiring
 │   ├── frontend.yaml              # private S3 bucket + CloudFront (+ ACM cert / custom domain)
 │   └── github-oidc.yaml           # IAM role GitHub Actions assumes via OIDC (no access keys)
 │
 ├── scripts/                       # imperative glue the Makefile calls; each one is idempotent
-│   ├── deploy-auth.sh             # auth stack (Google secret as a NoEcho parameter, never in git)
+│   ├── infra-env.sh               # Terraform outputs -> .env; Google URIs, DKIM records
 │   ├── deploy-backend.sh          # build image → push to ECR (tag = git SHA) → update stack → migrate
 │   ├── deploy-frontend.sh         # vite build against BACKEND_URL → s3 sync → CloudFront invalidation
 │   ├── domain.sh                  # ACM certificate (DNS-validated) + the CNAMEs to add for app./api.
@@ -412,19 +412,20 @@ browser ─/login/─> Cognito managed login (spry-anastasiia.auth.us-east-1.ama
         <─ /auth/callback/?code=&state= ── code + PKCE verifier exchanged for tokens in the browser
 ```
 
-- **`infra/auth.yaml`** (stack `spry-auth`, `make deploy-auth`): user pool (sign-in with email,
+- **`infra/auth.tf`** (Terraform, applied by HCP Terraform): user pool (sign-in with email,
   email auto-verified, self sign-up on, Essentials tier), Google identity provider (scopes
   `openid email profile`, `email`/`email_verified`/`name` mapped), a **public** app client
   (no secret, code flow, PKCE), domain prefix `spry-anastasiia` with managed login v2 and the
   default branding plus a page background image (`infra/assets/login-background.jpg`, applied by
-  `deploy-auth.sh` through the managed-login branding API). Sign-up asks for email, password and
+  `make auth-branding` through the managed-login branding API). Sign-up asks for email, password and
   a **username** (`preferred_username`, required; for Google users it is mapped from their name).
 - **Callback URLs** (exact, trailing slash): `<origin>/auth/callback/` and logout `<origin>/login/`
   (signing out lands back on the sign-in page) and `<origin>/` for
   `https://app.spry.pp.ua`, the CloudFront name and `http://localhost:5173`.
-- **Secrets:** `GOOGLE_CLIENT_SECRET` lives in `.env` (gitignored) and goes to CloudFormation as a
-  `NoEcho` parameter. The frontend needs no secret: authority, client id and domain are public
-  and come from the stack's outputs at build time (`deploy-frontend.sh`), never by copy-paste.
+- **Secrets:** the Google client secret is the sensitive Terraform variable `google_client_secret`
+  in the HCP Terraform workspace (never in a file in Git; it is in the state, see
+  docs/decisions/0005). The frontend needs no secret: authority, client id and domain are public
+  and come from the Terraform outputs at build time (`deploy-frontend.sh`), never by copy-paste.
 - **Frontend:** `react-oidc-context` + `oidc-client-ts`.
   - `/login/` starts the redirect (`signinRedirect()`); this is the URL to hand out, because the
     library must store `state` and the PKCE verifier before leaving the site.
@@ -433,16 +434,16 @@ browser ─/login/─> Cognito managed login (spry-anastasiia.auth.us-east-1.ama
     signed out; username · email + **Sign out** when signed in. Sign-out clears the local session, then
     goes to Cognito's `/logout?client_id=…&logout_uri=…` (Cognito has no OIDC end-session).
   - `/privacy/` — privacy policy linked from Google's consent screen.
-- A build without the Cognito variables (plain `docker compose up` before `make deploy-auth`)
+- A build without the Cognito variables (plain `docker compose up` before the infrastructure exists)
   simply has no sign-in.
 - **The meetings page requires sign-in** (when the build has Cognito settings): signed out, it
   shows a "Sign in" prompt instead of data. Every API call sends the **access token** (read from
   the session `oidc-client-ts` keeps in `localStorage`); file downloads are fetched with the
   token and saved, because a plain link cannot carry it.
 - **Backend:** `app/auth.py` verifies the token (see §4); `deploy-backend.sh` reads the pool id
-  and client id from the `spry-auth` stack and passes the pool's JWKS to the Lambda.
+  and client id from the Terraform outputs and passes the pool's JWKS to the Lambda.
 - **One email, one account:** a Cognito pre sign-up trigger (`LinkAccountsFunction` in
-  `infra/auth.yaml`) links the first Google sign-in to an existing password account with the
+  `infra/auth.tf`) links the first Google sign-in to an existing password account with the
   same email, so both ways sign in as the same user (same `sub`, same meetings). It links only
   when the email is verified on both sides (Google's `email_verified`, and the code the
   password user confirmed). A password sign-up for an email that already uses Google is
@@ -451,8 +452,8 @@ browser ─/login/─> Cognito managed login (spry-anastasiia.auth.us-east-1.ama
 ## 10. Weekly meetings report (event-driven, AWS)
 
 Every Monday 07:00 Europe/Kyiv the system builds last week's report, saves it to S3 and emails
-it. Nobody clicks anything. Template `infra/reports.yaml`, deployed by `make deploy-reports`
-(after `make deploy-backend`; it reads the VPC, subnets, security group, image and database URL
+it. Nobody clicks anything. Terraform `infra/reports.tf`, applied by HCP Terraform
+(it reads the VPC, subnets, security group, image and database URL
 from the `spry-backend` stack).
 
 ```
@@ -488,9 +489,9 @@ make report-now ───────┴─> SQS report-requests ──(3 receiv
 - **SES** — domain identity with DKIM (three CNAMEs at nic.ua); the account is in the sandbox,
   so the recipient is verified as a second identity.
 - **Bucket** — `<project>-reports-<account>`, private, SSE-S3, objects under `reports/` expire
-  after 90 days. The name is built, not `!GetAtt`, to avoid the bucket ↔ permission cycle.
-- **Lab switches** (in `.env`, then `make deploy-reports`): `REPORT_SCHEDULE="rate(5 minutes)"`
-  for a test run of the schedule; `REPORT_FAIL_WEEK=2026-W13` makes that one week fail, to watch
+  after 90 days. In Terraform the bucket, its notification and the Lambda permission are separate resources, so there is no cycle.
+- **Lab switches** (in `infra/terraform.tfvars`, through a pull request): `schedule_expression = "rate(5 minutes)"`
+  for a test run of the schedule; `report_fail_week = "2026-W13"` makes that one week fail, to watch
   it reach the DLQ. Unset both afterwards.
 - **Commands** — `make report-now`, `make report-ls`, `make report-logs`, `make report-dlq`.
 
@@ -518,7 +519,7 @@ browser ──PUT /api/meetings/{id}/agenda (+ ai_suggestion)──> API (VPC) �
   choice, which Opus 5.5 rejects, so the prompt asks for it). Invalid output is sent back once with the validation error; no tool call, or no items and
   no action items, is "no agenda found". `PROMPT_VERSION = "agenda-v1"`.
 - **Lambda** — `app/ai/agenda_lambda.py`, the backend image with `ImageConfig.Command`, 512 MB,
-  30 s, outside the VPC (`infra/ai.yml`, stack `spry-ai`, `make deploy-ai`). Role:
+  30 s, outside the VPC (`infra/ai.tf`, applied by HCP Terraform). Role:
   `bedrock:InvokeModel` on this region's foundation models. Verifies the Cognito access token with the pool's
   JWKS (fetched: it has internet). Answers `200`, `400` bad body, `401` token, `413` > 10,000
   chars, `422` no agenda, `429` Bedrock throttling, `503` Bedrock unavailable. CORS (POST,
@@ -532,10 +533,10 @@ browser ──PUT /api/meetings/{id}/agenda (+ ai_suggestion)──> API (VPC) �
   marked *suggested* until touched; empty stays empty. Suggested meeting title/time are shown
   with an opt-in "Also update the meeting" checkbox (PATCH through the normal API). Save is
   always `PUT /api/meetings/{id}/agenda`, carrying the untouched suggestion. Each error has its
-  own message and "Type it instead". `VITE_PARSER_URL` (from the `spry-ai` stack, build time);
+  own message and "Type it instead". `VITE_PARSER_URL` (Terraform output `parser_url`, build time);
   empty hides the paste box.
-- **Budget** — AWS Budgets `spry-monthly`, $5, net of credits, emails `BUDGET_EMAIL` (default:
-  the first `REPORT_RECIPIENTS`) on actual > 100 % and forecast > 100 %.
+- **Budget** — AWS Budgets `spry-monthly`, $5, net of credits, emails `budget_email`
+  (`infra/terraform.tfvars`) on actual > 100 % and forecast > 100 %.
 - **Commands** — `make llm-hello` (first call from the laptop), `make parse TEXT="..."` (one
-  parse: JSON, usage, cost; `PARSER_MODEL=... make parse` to compare), `make deploy-ai`,
+  parse: JSON, usage, cost; `PARSER_MODEL=... make parse` to compare), `make infra-plan`,
   `make ai-logs`. Laptop commands run in the backend container with `~/.aws` mounted read-only.

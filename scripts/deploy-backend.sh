@@ -194,25 +194,22 @@ fi
 
 # --- sign-in: which user pool's tokens the API accepts ---------------------
 
-# Read from the auth stack (make deploy-auth), never typed in. The function has
-# no internet route, so the pool's public keys are fetched here and passed in.
-# No auth stack (or CI without it): leave the parameters out, and the stack
-# keeps whatever it already has.
-auth_output() {
-  aws cloudformation describe-stacks --stack-name "${PROJECT_NAME}-auth" \
-    --query "Stacks[0].Outputs[?OutputKey=='$1'].OutputValue" --output text 2>/dev/null || true
-}
-COGNITO_USER_POOL_ID="$(auth_output UserPoolId)"
-COGNITO_CLIENT_ID="$(auth_output ClientId)"
+# Read from Terraform's outputs (infra/auth.tf), never typed in. The function
+# has no internet route, so the pool's public keys are fetched here and passed
+# in. No outputs (no terraform login, or CI without TF_API_TOKEN): leave the
+# parameters out, and the stack keeps whatever it already has.
+tf_out() { terraform -chdir="${ROOT}/infra" output -raw "$1" 2>/dev/null || true; }
+COGNITO_USER_POOL_ID="$(tf_out user_pool_id)"
+COGNITO_CLIENT_ID="$(tf_out client_id)"
 COGNITO_JWKS=""
-if [[ -n "${COGNITO_USER_POOL_ID}" && "${COGNITO_USER_POOL_ID}" != "None" ]]; then
+if [[ -n "${COGNITO_USER_POOL_ID}" ]]; then
   JWKS_URL="https://cognito-idp.${AWS_REGION}.amazonaws.com/${COGNITO_USER_POOL_ID}/.well-known/jwks.json"
   log "API will accept tokens from ${COGNITO_USER_POOL_ID} (client ${COGNITO_CLIENT_ID})"
   COGNITO_JWKS="$(curl -fsS --max-time 20 "${JWKS_URL}" \
     | python3 -c 'import json,sys; print(json.dumps(json.load(sys.stdin), separators=(",", ":")))')" \
     || die "could not fetch ${JWKS_URL}"
 else
-  warn "no ${PROJECT_NAME}-auth stack - keeping the API's current sign-in settings"
+  warn "no terraform outputs - keeping the API's current sign-in settings"
   COGNITO_USER_POOL_ID=""; COGNITO_CLIENT_ID=""
 fi
 
@@ -336,8 +333,8 @@ fi
 
 # --- weekly report builder ----------------------------------------------------
 
-# The report builder runs this same image (infra/reports.yaml). Roll it too,
-# so a push to main never leaves it on old code. No reports stack: nothing to do.
+# The report builder runs this same image (infra/reports.tf). Roll it too,
+# so a push to main never leaves it on old code (Terraform ignores image_uri).
 BUILDER="${PROJECT_NAME}-report-builder"
 if aws lambda get-function --function-name "${BUILDER}" >/dev/null 2>&1; then
   log "rolling ${BUILDER} to the new image"
@@ -346,7 +343,7 @@ if aws lambda get-function --function-name "${BUILDER}" >/dev/null 2>&1; then
   aws lambda wait function-updated-v2 --function-name "${BUILDER}"
 fi
 
-# The agenda parser (infra/ai.yml) too, for the same reason.
+# The agenda parser (infra/ai.tf) too, for the same reason.
 PARSER="${PROJECT_NAME}-agenda-parser"
 if aws lambda get-function --function-name "${PARSER}" >/dev/null 2>&1; then
   log "rolling ${PARSER} to the new image"

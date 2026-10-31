@@ -102,6 +102,18 @@ jobs:
           cache: pnpm
           cache-dependency-path: frontend/pnpm-lock.yaml
 
+      # The infrastructure itself is applied by HCP Terraform, not here. The
+      # scripts only read its outputs (user pool, client, parser URL), with a
+      # HCP Terraform API token in the TF_API_TOKEN repository secret.
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "~1.17"
+          cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
+          terraform_wrapper: false
+
+      - name: Connect to the Terraform workspace (read outputs)
+        run: make infra-init
+
       # Image tagged with the commit SHA -> ECR -> Lambda -> migrations.
       - name: Deploy backend
         run: make deploy-backend

@@ -1,7 +1,7 @@
 """Paste an agenda: free text in, a validated ParsedAgenda out.
 
 No Lambda and no database in here - the parser receives text and returns JSON,
-which is why its function runs outside the VPC (infra/ai.yml). The model only
+which is why its function runs outside the VPC (infra/ai.tf). The model only
 suggests; the user checks the pre-filled form and saves it through the normal
 API.
 

@@ -1,4 +1,4 @@
-"""Entry point of the agenda-parser Lambda (infra/ai.yml), behind its own function URL.
+"""Entry point of the agenda-parser Lambda (infra/ai.tf), behind its own function URL.
 
 The backend's image with another command, outside the VPC: it needs Bedrock and
 Cognito's public keys, never the database. It only answers with a suggestion;

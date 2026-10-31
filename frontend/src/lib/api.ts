@@ -7,7 +7,7 @@ const API_URL = (
   import.meta.env.VITE_API_URL ?? "http://localhost:8000"
 ).replace(/\/$/, "");
 
-/** The agenda parser's own function URL (make deploy-ai). Empty: no "Paste an agenda". */
+/** The agenda parser's own function URL (make infra-env). Empty: no "Paste an agenda". */
 const PARSER_URL = (
   (import.meta.env.VITE_PARSER_URL as string | undefined) ?? ""
 ).replace(/\/$/, "");

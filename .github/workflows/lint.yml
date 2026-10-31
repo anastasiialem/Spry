@@ -67,3 +67,26 @@ jobs:
 
       - name: tsc --noEmit
         run: pnpm exec tsc --noEmit
+
+  terraform:
+    name: Terraform (fmt + validate)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "~1.17"
+
+      - name: terraform fmt -check
+        run: terraform fmt -check -recursive -diff
+
+      # -backend=false: no HCP Terraform token needed just to check the code.
+      # The plan itself is HCP Terraform's check on the pull request.
+      - name: terraform validate
+        run: |
+          terraform init -backend=false -input=false
+          terraform validate
