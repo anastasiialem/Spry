@@ -7,4 +7,5 @@ echo "[entrypoint] alembic upgrade head"
 alembic upgrade head
 
 echo "[entrypoint] starting uvicorn $*"
-exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --log-level "${LOG_LEVEL:-info}" "$@"
+# PORT: Cloud Run sets it (8080); Compose and plain docker run use 8000.
+exec uvicorn app.main:app --host 0.0.0.0 --port "${PORT:-8000}" --log-level "${LOG_LEVEL:-info}" "$@"

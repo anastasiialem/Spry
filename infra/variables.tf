@@ -43,6 +43,12 @@ variable "app_domain_name" {
   description = "The site's custom domain (app.example.com). Empty: only the CloudFront host and localhost."
 }
 
+variable "extra_site_origins" {
+  type        = list(string)
+  default     = []
+  description = "Other origins that serve the same site and sign in with this pool (e.g. the Firebase Hosting copy on GCP)."
+}
+
 variable "frontend_port" {
   type        = number
   default     = 5173

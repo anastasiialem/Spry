@@ -33,6 +33,7 @@ EXPOSE 8000
 CMD ["sh", "./scripts/entrypoint.sh", "--reload"]
 
 # --- runtime: production-like container, no dev dependencies, non-root ---
+# Also what Cloud Run runs (make gcp-deploy-backend): plain HTTP on $PORT, no Lambda adapter.
 FROM python:3.14-slim AS runtime
 
 ENV PATH="/opt/venv/bin:$PATH" \

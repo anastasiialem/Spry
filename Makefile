@@ -5,7 +5,9 @@ COMPOSE := docker compose
 	domain-cert domain-dns deploy-frontend destroy-frontend github-role \
 	infra-init infra-fmt infra-validate infra-plan infra-output infra-env auth-branding \
 	report-local report-now report-ls report-logs report-dlq \
-	llm-hello parse ai-logs
+	llm-hello parse ai-logs \
+	gcp-bootstrap gcp-init gcp-plan gcp-apply gcp-output gcp-deploy-backend \
+	gcp-deploy-frontend gcp-db-stop gcp-db-start gcp-destroy
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
@@ -113,6 +115,42 @@ infra-env: ## Copy public outputs (Cognito, parser URL) to .env; print Google/DK
 
 auth-branding: ## Sign-in page background image (through the API, on top of Terraform's style)
 	./scripts/auth-branding.sh
+
+# --- Google Cloud (lab 9): gcp/, its own HCP Terraform workspace spry-gcp ---
+
+GTF := terraform -chdir=gcp
+GCP_PROJECT = $$($(GTF) output -raw db_connection_name | cut -d: -f1)
+
+gcp-bootstrap: ## Once, with your own gcloud login: service accounts + Workload Identity (local state)
+	terraform -chdir=gcp/bootstrap init -input=false
+	terraform -chdir=gcp/bootstrap apply
+
+gcp-init: ## Connect gcp/ to the spry-gcp workspace (after terraform login)
+	$(GTF) init -input=false
+
+gcp-plan: ## Plan gcp/ in HCP Terraform
+	$(GTF) plan
+
+gcp-apply: ## Apply gcp/ (CLI-driven workspace only; a VCS-driven one applies on merge)
+	$(GTF) apply
+
+gcp-output: ## Outputs of gcp/: api_url, site_url, image repository
+	$(GTF) output
+
+gcp-deploy-backend: ## Build + push the API image to Artifact Registry, roll Cloud Run
+	./scripts/gcp-deploy-backend.sh
+
+gcp-deploy-frontend: ## Vite build (API through the /api/** rewrite) -> Firebase Hosting
+	./scripts/gcp-deploy-frontend.sh
+
+gcp-db-stop: ## Stop Cloud SQL now (disk still bills); also set db_activation_policy = "NEVER"
+	gcloud sql instances patch spry-db --activation-policy=NEVER --project $(GCP_PROJECT) --quiet
+
+gcp-db-start: ## Start Cloud SQL again
+	gcloud sql instances patch spry-db --activation-policy=ALWAYS --project $(GCP_PROJECT) --quiet
+
+gcp-destroy: ## Delete everything gcp/ created, the database included
+	$(GTF) destroy
 
 # --- weekly report (lab: background work) ---
 

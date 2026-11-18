@@ -14,3 +14,6 @@ infra/.terraform/
 infra/.build/
 *.tfstate
 *.tfstate.*
+gcp/.terraform/
+gcp/bootstrap/
+gcp/public/
