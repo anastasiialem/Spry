@@ -5,8 +5,24 @@ Service choices: [ADR 0006](decisions/0006-google-cloud.md). How to deploy: [REA
 ## Part 3 — What it costs
 
 On-demand list prices in USD, AWS `us-east-1`, Google Cloud `us-central1`, 730 hours a month,
-no tax. To be checked against the AWS and Google Cloud pricing calculators (links to the saved
-estimates go here).
+no tax. Checked on 18 November 2026 against the same data the two pricing calculators use: the
+AWS Price List API (`aws pricing get-products`) and the Google Cloud Billing Catalog API
+(`cloudbilling.googleapis.com/v1/services/*/skus`).
+
+| Unit price | Value | Source SKU |
+|---|---|---|
+| RDS `db.t4g.micro`, PostgreSQL, Single-AZ | $0.016 / h | `InstanceUsage:db.t4g.micro` |
+| RDS gp2 storage | $0.115 / GB-month | `RDS:GP2-Storage` |
+| Secrets Manager | $0.40 / secret-month | `AWSSecretsManager-Secrets` |
+| Lambda | $0.20 / 1M requests; $0.0000166667 / GB-s | `Request`, `Lambda-GB-Second` (tier 1) |
+| Aurora Serverless v2 (reference design) | $0.12 / ACU-hour | `Aurora:ServerlessV2Usage` |
+| Cloud SQL PostgreSQL `db-f1-micro`, zonal | $0.0105 / h | *Zonal - Micro instance in Americas* |
+| Cloud SQL SSD storage | $0.17 / GiB-month | *Zonal - Standard storage in Americas* |
+| Cloud Run, request-based | $0.000024 / vCPU-s; $0.0000025 / GiB-s; $0.40 / 1M requests above 2M | *Services CPU / Memory (Request-based billing)*, *Requests* |
+| Cloud Run, idle min instance | $0.0000025 / vCPU-s; $0.0000025 / GiB-s | *Services Min Instance CPU / Memory* |
+| Cloud Run, instance-based | $0.000018 / vCPU-s; $0.000002 / GiB-s | *Services CPU / Memory (Instance-based billing) in us-central1* |
+
+Firestore prices are the ones given in the lab (us-central1), not looked up separately.
 
 ### Spry's core, nobody using it for a month
 
@@ -21,7 +37,7 @@ cannot pause and restarts by itself seven days after a stop.
 | Database storage | 20 GB gp2 × $0.115 → **$2.30** | 10 GB SSD × $0.17 → **$1.70** (billed while stopped too) |
 | Secrets | Secrets Manager, 1 secret → **$0.40** | Secret Manager, 1 version → free |
 | Registry, logs | ECR < 0.5 GB, CloudWatch → a few cents | Artifact Registry < 0.5 GB, Cloud Logging → free |
-| **Total** | **≈ $14.40** | **≈ $9.40**, or **≈ $1.70** with the instance stopped |
+| **Total** | **≈ $14.38** | **≈ $9.40**, or **≈ $1.70** with the instance stopped |
 
 Free-tier assumptions: Cloud Run's monthly 2M requests, 180,000 vCPU-s and 360,000 GiB-s;
 Lambda's 1M requests and 400,000 GB-s; Firebase Hosting's 10 GB stored and 360 MB/day out
@@ -67,11 +83,13 @@ Against the course's reference design (Aurora Serverless v2 at 0–1 ACU, $0.12 
 **Lab 4 showed that Aurora gets more expensive than an instance when something keeps it awake.
 Where is the same trap on Google Cloud?**
 
-1. **Cloud Run that never sleeps.** `min_instance_count = 1`, or *instance-based billing*
-   (CPU always allocated), bills the instance every second whether requests come or not:
-   1 vCPU + 512 MiB around the clock is roughly $45–50 a month, five times the database. A
-   health check from an uptime monitor does not do this with request-based billing (only active
-   time is billed), but `min_instance_count = 1` "to avoid cold starts" does.
+1. **Cloud Run that never sleeps.** *Instance-based billing* (CPU always allocated) bills the
+   instance every second whether requests come or not: 1 vCPU + 512 MiB × 2,628,000 s ×
+   ($0.000018 + 0.5 × $0.000002) ≈ **$50 a month**, five times the database. A milder version is
+   `min_instance_count = 1` "to avoid cold starts" with request-based billing: the idle instance
+   is billed at the min-instance rate, 2,628,000 s × ($0.0000025 + 0.5 × $0.0000025) ≈
+   **$9.86 a month**, more than the Cloud SQL instance itself. A health check from an uptime
+   monitor does neither: with request-based billing and min 0, only active time is billed.
 2. **Firestore reads that follow the code.** The busy profile above: the database that costs $0
    idle becomes the most expensive line once a list page reads 20 documents per visit. A
    frontend that polls, or a page that reads a whole collection, spends the daily free 50,000
@@ -108,31 +126,3 @@ printed agenda into text, and the LLM turns that text into meetings.
 | Athena queries, billed by data scanned | BigQuery queries, billed by data scanned ($6.25/TiB, 1 TiB free) | the results bucket, workgroups, partition projection |
 | Kinesis → Lambda alert (streaming part) | Pub/Sub → Dataflow streaming → BigQuery | shards and their scaling |
 | (no dashboard) | Looker Studio over BigQuery, free | — |
-
-## What we discuss in class
-
-**Lock-in.** Unchanged: the container image, FastAPI, SQLAlchemy, Alembic, the PostgreSQL schema,
-the React app. Changed: one line in the entrypoint (`$PORT`) and all of the infrastructure code
-(Terraform `aws` → `google` provider is a rewrite, not a port). The lock-in is not in compute
-(a container runs anywhere) and not in PostgreSQL; it is in the **managed services around them**:
-Cognito's user pool and its non-exportable passwords, SES's verified domain, Bedrock's model
-access, the S3 report archive, and IAM. A Firestore choice would have moved the lock-in into
-the data layer.
-
-**Multicloud.** As a migration state, fine. As a target, Spry's split (site + API + DB on GCP,
-sign-in + parser + reports on AWS) costs: a browser that talks to three origins in two clouds;
-two IAM systems, two bills, two Terraform workspaces, two sets of logs to search during an
-incident; and cross-cloud egress ($0.08–0.12/GB each way) the moment the report builder on AWS
-needs the database on GCP. It is worth it only where a service on the other cloud is clearly
-better (BigQuery, a model only one cloud has) and the boundary is a narrow API.
-
-**Scale to zero.** Giving up SQL to save ~$9 a month (or ~$1.70 with a stopped instance) is a good
-trade only for a new app with simple, query-shaped data and spiky, mostly-idle traffic. For
-Spry it is a bad trade: relations, attachments, migrations and every query rewritten, and the
-bill grows *faster* than Cloud SQL's once traffic is real (busy profile: $17.57 against $11.61).
-
-**Choosing a cloud.** When both host an API equally well, the deciding factors, in order: what
-the team already knows and operates (on-call, IAM, Terraform modules); credits (a $300 or
-startup credit decides the first year); a specific service the product needs (BigQuery, a
-model, Firebase for a mobile app); and only then list price, which at Spry's size is a few
-dollars either way.
