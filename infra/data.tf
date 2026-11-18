@@ -69,10 +69,11 @@ locals {
 
   route_table_ids = length(data.aws_route_tables.subnets.ids) > 0 ? data.aws_route_tables.subnets.ids : data.aws_route_tables.main.ids
 
-  # Every origin the site is served from, plus Vite's dev server.
-  site_origins = compact([
+  # Every origin the site is served from, plus Vite's dev server and any copy
+  # hosted elsewhere (the Firebase Hosting site, Lab 9).
+  site_origins = compact(concat([
     var.app_domain_name != "" ? "https://${var.app_domain_name}" : "",
     "https://${data.aws_cloudformation_stack.frontend.outputs["DistributionDomainName"]}",
     "http://localhost:${var.frontend_port}",
-  ])
+  ], var.extra_site_origins))
 }

@@ -8,6 +8,8 @@ region       = "us-east-1"
 cognito_domain_prefix = "spry-anastasiia"
 google_client_id      = "324008245985-d7fhqqdc8p8jslgrkv7jogcc8201it7v.apps.googleusercontent.com"
 app_domain_name       = "app.spry.pp.ua"
+# The copy on Google Cloud (gcp/, Lab 9) signs in with the same pool.
+extra_site_origins = ["https://spry-anastasiia-2026.web.app"]
 
 # weekly report
 mail_domain       = "spry.pp.ua"
@@ -18,5 +20,6 @@ allowed_origins = [
   "https://app.spry.pp.ua",
   "https://dwpif3yujzq45.cloudfront.net",
   "http://localhost:5173",
+  "https://spry-anastasiia-2026.web.app",
 ]
 budget_email = "lem.pn@ucu.edu.ua"
