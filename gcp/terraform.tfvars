@@ -5,7 +5,7 @@ project_id = "spry-anastasiia-2026"
 region     = "us-central1"
 
 # Stop the database: "NEVER", then plan + apply. Start it again: "ALWAYS".
-db_activation_policy = "ALWAYS"
+db_activation_policy = "NEVER"
 
 # make infra-output (the AWS workspace): pool id and web client id.
 cognito_region       = "us-east-1"
